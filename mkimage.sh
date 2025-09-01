@@ -2,6 +2,7 @@
 
 cmake --build build -j$(nproc)
 
+objcopy --only-keep-debug buildroot/boot/vmpenumbra buildroot/boot/vmpenumbra.sym
 dd if=/dev/zero of=boot.img bs=512 count=93750
 parted boot.img -s -a minimal mklabel gpt
 parted boot.img -s -a minimal mkpart EFI FAT16 2048s 93716s
