@@ -1,0 +1,14 @@
+{
+	"version": 5,
+	"configurePresets": [
+	{
+		"name": "default",
+		"generator" : "Ninja",
+		"cacheVariables": {
+			"CMAKE_EXPERIMENTAL_CXX_IMPORT_STD": "d0edc3af-4c50-42ea-a356-e2862fe7a444",
+			"CMAKE_CXX_FLAGS": "-stdlib=libc++ -march=native -fdiagnostics-color=always -fPIC -fno-exceptions",
+			"CMAKE_BUILD_TYPE": "RelWithDebInfo"
+		}
+	}
+	]
+}
