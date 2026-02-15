@@ -104,6 +104,8 @@ constexpr VkFormat format_to_vk(GPUFormat fmt)
 		return VK_FORMAT_R8G8_UNORM;
 	case GPU_FORMAT_RGBA8_UNORM:
 		return VK_FORMAT_R8G8B8A8_UNORM;
+	case GPU_FORMAT_RGBA8_SRGB:
+		return VK_FORMAT_R8G8B8A8_SRGB;
 	case GPU_FORMAT_BGRA8_SRGB:
 		return VK_FORMAT_B8G8R8A8_SRGB;
 	case GPU_FORMAT_D16_UNORM:
@@ -1236,9 +1238,34 @@ GPUTexture gpu_create_texture(const GPUTextureDesc& desc)
 		.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED
 	};
 	
-	if(vkCreateImage(gpu_context->device, &image_ci, nullptr, &handle) != VK_SUCCESS)
+	const VkPhysicalDeviceImageFormatInfo2 format_info
 	{
-		log::error("gpu_vulkan: failed to create texture");
+		.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGE_FORMAT_INFO_2,
+		.pNext = nullptr,
+		.format = image_ci.format,
+		.type = image_ci.imageType,
+		.tiling = image_ci.tiling,
+		.usage = image_ci.usage,
+		.flags = image_ci.flags
+	};
+
+	VkImageFormatProperties2 format_props
+	{
+		.sType = VK_STRUCTURE_TYPE_IMAGE_FORMAT_PROPERTIES_2,
+		.pNext = nullptr
+	};
+
+	auto status = vkGetPhysicalDeviceImageFormatProperties2(gpu_context->phys_device, &format_info, &format_props);
+	if(status != VK_SUCCESS)
+	{
+		log::error("gpu_vulkan: failed to create texture: {}", string_VkResult(status));
+		return {0, 0, uvec3{0u}};
+	}
+
+	status = vkCreateImage(gpu_context->device, &image_ci, nullptr, &handle);
+	if(status != VK_SUCCESS)
+	{
+		log::error("gpu_vulkan: failed to create texture: {}", string_VkResult(status));
 		return {0, 0, uvec3{0u}};
 	}
 
@@ -1247,7 +1274,7 @@ GPUTexture gpu_create_texture(const GPUTextureDesc& desc)
 	auto mem_type = get_memory_type(mem_req.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
 	if(!mem_type.has_value())
 	{
-		log::error("gpu_vulkan: failed to allocate texture memory");
+		log::error("gpu_vulkan: failed to allocate texture memory: invalid memory heap");
 		return {0, 0, uvec3{0u}};
 	}
 
@@ -1259,13 +1286,20 @@ GPUTexture gpu_create_texture(const GPUTextureDesc& desc)
 		.allocationSize = mem_req.size,
 		.memoryTypeIndex = mem_type.value()
 	};
-	if(vkAllocateMemory(gpu_context->device, &alloc, nullptr, &memory) != VK_SUCCESS)
+
+	status = vkAllocateMemory(gpu_context->device, &alloc, nullptr, &memory);
+	if(status != VK_SUCCESS)
 	{
-		log::error("gpu_vulkan: failed to allocate texture memory");
+		log::error("gpu_vulkan: failed to allocate texture memory: {}", string_VkResult(status));
 		return {0, 0, uvec3{0u}};
 	}
-
-       	vkBindImageMemory(gpu_context->device, handle, memory, 0);
+	
+	status = vkBindImageMemory(gpu_context->device, handle, memory, 0);
+	if(status != VK_SUCCESS)
+	{
+		log::error("gpu_vulkan: failed to allocate texture memory: {}", string_VkResult(status));
+		return {0, 0, uvec3{0u}};
+	}
 
 	return
 	{
@@ -1281,7 +1315,7 @@ void gpu_destroy_texture(GPUTexture& tex)
 	vkFreeMemory(gpu_context->device, std::bit_cast<VkDeviceMemory>(tex.allocation), nullptr);
 }
 
-GPUTextureDescriptor gpu_texture_view_descriptor(const GPUTexture& tex, const GPUViewDesc& desc)
+VkImageView create_image_view(const GPUTexture& tex, const GPUViewDesc& desc)
 {
 	const VkImageViewCreateInfo view_ci
 	{
@@ -1309,11 +1343,21 @@ GPUTextureDescriptor gpu_texture_view_descriptor(const GPUTexture& tex, const GP
 	};
 
 	VkImageView view;
-	if(vkCreateImageView(gpu_context->device, &view_ci, nullptr, &view) != VK_SUCCESS)
+	auto result = vkCreateImageView(gpu_context->device, &view_ci, nullptr, &view);
+	if(result != VK_SUCCESS)
 	{
-		log::error("gpu_vulkan: failed to create texture descriptor");
-		return GPUTextureDescriptor{0, 0, nullptr, desc};
+		log::error("gpu_vulkan: failed to create texture descriptor: {}", string_VkResult(result));
+		return VK_NULL_HANDLE;
 	}
+
+	return view;
+}
+
+GPUTextureDescriptor gpu_texture_view_descriptor(const GPUTexture& tex, const GPUViewDesc& desc)
+{
+	auto view = create_image_view(tex, desc);
+	if(view == VK_NULL_HANDLE)
+		return {0, 0, nullptr, desc};
 
 	const VkDescriptorImageInfo img_info
 	{
@@ -1340,6 +1384,39 @@ GPUTextureDescriptor gpu_texture_view_descriptor(const GPUTexture& tex, const GP
 
 	gpu_context->bindless_texture_heap.resources.push_back(view);	
 	return GPUTextureDescriptor{static_cast<uint32_t>(gpu_context->bindless_texture_heap.resources.size()) - 1, 0, &tex, desc};
+}
+
+GPUTextureDescriptor gpu_rwtexture_view_descriptor(const GPUTexture& tex, const GPUViewDesc& desc)
+{
+	auto view = create_image_view(tex, desc);
+	if(view == VK_NULL_HANDLE)
+		return {0, 0, nullptr, desc};
+
+	const VkDescriptorImageInfo img_info
+	{
+		.sampler = VK_NULL_HANDLE,
+		.imageView = view,
+		.imageLayout = VK_IMAGE_LAYOUT_GENERAL
+	};
+
+	const VkWriteDescriptorSet ds_write
+	{
+		.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+		.pNext = nullptr,
+		.dstSet = gpu_context->bindless_rwtexture_heap.set,
+		.dstBinding = 0,
+		.dstArrayElement = static_cast<uint32_t>(gpu_context->bindless_rwtexture_heap.resources.size()),
+		.descriptorCount = 1,
+		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+		.pImageInfo = &img_info,
+		.pBufferInfo = nullptr,
+		.pTexelBufferView = nullptr
+	};
+
+	vkUpdateDescriptorSets(gpu_context->device, 1u, &ds_write, 0u, nullptr);
+
+	gpu_context->bindless_rwtexture_heap.resources.push_back(view);
+	return GPUTextureDescriptor{static_cast<uint32_t>(gpu_context->bindless_rwtexture_heap.resources.size() - 1), GPU_TEXTURE_DESCRIPTOR_RW, &tex, desc};
 }
 
 void gpu_destroy_texture_view(GPUTextureDescriptor& view)
@@ -2173,7 +2250,10 @@ void gpu_dispatch_indirect(const GPUCommandBuffer& cmd, void* data, const GPUPoi
 
 constexpr VkImageView image_view_from_descriptor(GPUTextureDescriptor& tex)
 {
-	return gpu_context->bindless_texture_heap.resources[tex.handle];
+	if(tex.flags & GPU_TEXTURE_DESCRIPTOR_RW)
+		return gpu_context->bindless_rwtexture_heap.resources[tex.handle];
+	else
+		return gpu_context->bindless_texture_heap.resources[tex.handle];
 }
 
 void gpu_begin_renderpass(const GPUCommandBuffer& cmd, const GPURenderPassDesc& rp)
