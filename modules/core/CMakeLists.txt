@@ -22,7 +22,7 @@ endif()
 
 find_package(SDL3 REQUIRED)
 
-target_link_libraries(penumbra_core PUBLIC ${PENUMBRA_CORE_LIBRARIES} PRIVATE spdlog::spdlog penumbra_math SDL3::SDL3)
+target_link_libraries(penumbra_core PUBLIC Tracy::TracyClient ${PENUMBRA_CORE_LIBRARIES} PRIVATE spdlog::spdlog penumbra_math SDL3::SDL3)
 target_sources(penumbra_core PUBLIC FILE_SET CXX_MODULES FILES
 	array_proxy.cppm
 	config.cppm

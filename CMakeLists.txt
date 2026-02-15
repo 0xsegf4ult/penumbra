@@ -12,6 +12,7 @@ include(FetchContent)
 
 option(PENUMBRA_BUILD_TOOLS "Build tools" ON)
 option(PENUMBRA_BUILD_EDITOR "Build editor" ON)
+option(PENUMBRA_ENABLE_TRACY "Enable Tracy" OFF)
 
 if(NOT ${CMAKE_GENERATOR} MATCHES "Ninja")
 	message(FATAL_ERROR "Generator ${CMAKE_GENERATOR} is not supported with C++ modules")

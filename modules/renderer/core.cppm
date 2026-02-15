@@ -1,6 +1,7 @@
 module;
 
 #include <cassert>
+#include <tracy/Tracy.hpp>
 
 export module penumbra.renderer;
 
@@ -70,7 +71,9 @@ export void renderer_shutdown()
 
 export void renderer_next_frame()
 {
-	renderer->frame_index = (renderer->frame_index + 1) % 2;
+	ZoneScoped;
+
+	renderer->frame_index = (renderer->frame_index + 1) % frames_in_flight;
 	gpu_wait_queue(GPU_QUEUE_GRAPHICS, renderer->gfx_queue_frames[renderer->frame_index]);
 	gpu_wait_queue(GPU_QUEUE_COMPUTE, renderer->compute_queue_frames[renderer->frame_index]);
 	renderer->cur_swapchain = gpu_swapchain_acquire_next(renderer->swapchain_acquire[renderer->frame_index]);
@@ -78,6 +81,8 @@ export void renderer_next_frame()
 
 export void renderer_process_frame(double dt)
 {
+	ZoneScoped;
+	
 	assert(renderer->cur_swapchain);
 	assert(renderer->cur_swapchain->texture);
 	auto wdim = renderer->cur_swapchain->texture->size;

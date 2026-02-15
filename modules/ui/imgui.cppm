@@ -1,3 +1,7 @@
+module;
+
+#include <tracy/Tracy.hpp>
+
 export module penumbra.ui:imgui;
 
 import penumbra.core;
@@ -217,6 +221,8 @@ export void imgui_backend_shutdown()
 
 export void imgui_backend_render(GPUCommandBuffer& cmd, double dt)
 {
+	ZoneScoped;
+
 	ImGuiIO& io = ImGui::GetIO();
 	auto* bd = reinterpret_cast<imgui_backend_penumbra*>(io.BackendPlatformUserData);
 
@@ -234,8 +240,11 @@ export void imgui_backend_render(GPUCommandBuffer& cmd, double dt)
 
 	platform_update_ime();
 
-	for(auto& hook : bd->hooks)
-		hook();
+	{
+		ZoneScopedN("user_hooks");
+		for(auto& hook : bd->hooks)
+			hook();
+	}
 
 	ImGui::ShowDemoWindow();
 

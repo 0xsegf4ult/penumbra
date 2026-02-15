@@ -8,6 +8,7 @@ module;
 #include <SDL3/SDL_keyboard.h>
 #include <SDL3/SDL_mouse.h>
 #include <SDL3/SDL_messagebox.h>
+#include <tracy/Tracy.hpp>
 
 export module penumbra.core:window;
 import penumbra.math;
@@ -86,6 +87,8 @@ public:
 
 	void poll_events() noexcept
 	{
+		ZoneScoped;
+
 		SDL_Event event;
 
 		while(SDL_PollEvent(&event))

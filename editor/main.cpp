@@ -1,3 +1,5 @@
+#include <tracy/Tracy.hpp>
+
 import penumbra.core;
 import penumbra.renderer;
 import penumbra.ui;
@@ -23,6 +25,8 @@ int main(int argc, const char** argv)
 
 	while(!window.requested_close())
 	{
+		ZoneScopedN("Main Loop");
+		
 		const auto end = std::chrono::steady_clock::now();
 		const auto frame_time = end - start;
 		start = end;
@@ -30,6 +34,8 @@ int main(int argc, const char** argv)
 		renderer_next_frame();
 		window.poll_events();
 		renderer_process_frame(double(frame_time.count()) / 1e9);
+		
+		FrameMark;
 	}
 
 	renderer_shutdown();

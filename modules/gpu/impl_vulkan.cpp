@@ -5,6 +5,7 @@ module;
 #include <SDL3/SDL_vulkan.h>
 #include <SDL3/SDL_error.h>
 #include <cassert>
+#include <tracy/Tracy.hpp>
 
 module penumbra.gpu;
 
@@ -1479,6 +1480,7 @@ GPUSampler gpu_create_sampler(const GPUSamplerDesc& desc)
 
 GPUCommandBuffer gpu_record_commands(GPUQueue queue)
 {
+	ZoneScoped;
 	assert(queue > GPU_QUEUE_INVALID);
 	auto& qd = gpu_context->queue_data[queue - 1];
 	auto thread = 0u; //FIXME 
@@ -1527,6 +1529,7 @@ GPUCommandBuffer gpu_record_commands(GPUQueue queue)
 
 uint64_t gpu_submit(GPUQueue queue, GPUCommandBuffer& cmd)
 {
+	ZoneScoped;
 	assert(queue > GPU_QUEUE_INVALID);
 
 	cmd.bound_pipe = nullptr;
@@ -1611,6 +1614,7 @@ uint64_t gpu_submit(GPUQueue queue, GPUCommandBuffer& cmd)
 
 bool gpu_wait_queue(GPUQueue queue, uint64_t timeline)
 {
+	ZoneScoped;
 	assert(queue > GPU_QUEUE_INVALID);
 
 	const VkSemaphoreWaitInfo wait
@@ -1637,6 +1641,7 @@ bool gpu_wait_queue(GPUQueue queue, uint64_t timeline)
 
 void gpu_wait_idle()
 {
+	ZoneScoped;
 	vkDeviceWaitIdle(gpu_context->device);
 }
 
@@ -2524,6 +2529,7 @@ void gpu_swapchain_init(Window& wnd)
 
 GPUTextureDescriptor* gpu_swapchain_acquire_next(GPUSemaphore& sem)
 {
+	ZoneScoped;
 	uint32_t image_index{0};
 	
 	do
@@ -2554,6 +2560,7 @@ GPUTextureDescriptor* gpu_swapchain_acquire_next(GPUSemaphore& sem)
 
 void gpu_swapchain_present(GPUQueue queue, GPUSemaphore& sem)
 {
+	ZoneScoped;
 	assert(queue > GPU_QUEUE_INVALID);
 	VkSemaphore present_sem = std::bit_cast<VkSemaphore>(sem.handle);
 
