@@ -418,6 +418,21 @@ constexpr VkIndexType index_type_to_vk(GPUIndexType type)
 	}
 }
 
+constexpr VkPresentModeKHR present_mode_to_vk(GPUPresentMode mode)
+{
+	switch(mode)
+	{
+	case GPU_PRESENT_MODE_FIFO:
+		return VK_PRESENT_MODE_FIFO_KHR;
+	case GPU_PRESENT_MODE_FIFO_RELAXED:
+		return VK_PRESENT_MODE_FIFO_RELAXED_KHR;
+	case GPU_PRESENT_MODE_IMMEDIATE:
+		return VK_PRESENT_MODE_IMMEDIATE_KHR;
+	default:
+		std::unreachable();
+	}
+}
+
 constexpr std::array<const char*, 1> default_instance_extensions =
 {
 	VK_EXT_DEBUG_UTILS_EXTENSION_NAME
@@ -477,13 +492,16 @@ struct QueueData
 	std::vector<CommandPool> cmd_pools;
 };
 
+enum ResourceHeapIndex
+{
+	BINDLESS_SAMPLERS,
+	BINDLESS_TEXTURES,
+	BINDLESS_RWTEXTURES
+};
+
 template <typename T>
 struct BindlessResourceHeap
 {
-	VkDescriptorSetLayout layout;
-	VkDescriptorPool pool;
-	VkDescriptorSet set;
-
 	std::vector<T> resources;
 };
 
@@ -495,6 +513,7 @@ struct GPUBuffer
 	size_t size;
 };
 
+
 struct gpu_context_t
 {
 	VkInstance instance;
@@ -504,6 +523,11 @@ struct gpu_context_t
 	std::array<QueueData, 3> queue_data;
 
 	std::vector<GPUBuffer> buffers;
+
+	VkDescriptorSetLayout empty_descriptor_layout;	
+	VkDescriptorSetLayout bindless_descriptor_layout;
+	VkDescriptorPool bindless_descriptor_pool;
+	VkDescriptorSet bindless_descriptor_set;
 
 	BindlessResourceHeap<VkImageView> bindless_texture_heap;
 	BindlessResourceHeap<VkImageView> bindless_rwtexture_heap;
@@ -729,6 +753,7 @@ bool vulkan_create_device(std::span<VkPhysicalDevice> phys_devices, int index = 
 	{
 		.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES,
 		.pNext = &chain_vk14,
+		.inlineUniformBlock = true,
 		.shaderDemoteToHelperInvocation = true,
 		.synchronization2 = true,
 		.dynamicRendering = true
@@ -893,23 +918,44 @@ bool vulkan_context_init()
 
 void vulkan_setup_descriptor_heaps()
 {
-	VkDescriptorBindingFlags bflags{VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT | VK_DESCRIPTOR_BINDING_UPDATE_UNUSED_WHILE_PENDING_BIT | VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT | VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT};
+	VkDescriptorBindingFlags bflags{VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT | VK_DESCRIPTOR_BINDING_UPDATE_UNUSED_WHILE_PENDING_BIT | VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT};
+
+	const auto bindings = std::to_array
+	({
+		VkDescriptorSetLayoutBinding
+		{
+			.binding = 0,
+			.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER,
+			.descriptorCount = max_bindless_samplers,
+			.stageFlags = VK_SHADER_STAGE_ALL,
+			.pImmutableSamplers = nullptr
+		},
+		VkDescriptorSetLayoutBinding
+		{
+			.binding = 1,
+			.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
+			.descriptorCount = max_bindless_textures,
+			.stageFlags = VK_SHADER_STAGE_ALL,
+			.pImmutableSamplers = nullptr
+		},
+		VkDescriptorSetLayoutBinding
+		{
+			.binding = 2,
+			.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+			.descriptorCount = max_bindless_textures,
+			.stageFlags = VK_SHADER_STAGE_ALL,
+			.pImmutableSamplers = nullptr
+		}
+	});
+	
+	std::array<VkDescriptorBindingFlags, bindings.size()> flags{bflags};
 
 	VkDescriptorSetLayoutBindingFlagsCreateInfo bflag_ci
 	{
 		.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO,
 		.pNext = nullptr,
-		.bindingCount = 1u,
-		.pBindingFlags = &bflags
-	};
-	
-	VkDescriptorSetLayoutBinding binding
-	{
-		.binding = 0,
-		.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
-		.descriptorCount = max_bindless_textures,
-	       	.stageFlags = VK_SHADER_STAGE_ALL,
-		.pImmutableSamplers = nullptr	
+		.bindingCount = static_cast<uint32_t>(flags.size()),
+		.pBindingFlags = flags.data()
 	};
 
 	VkDescriptorSetLayoutCreateInfo layout_ci
@@ -917,15 +963,30 @@ void vulkan_setup_descriptor_heaps()
 		.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
 		.pNext = &bflag_ci,
 		.flags = VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT,
-		.bindingCount = 1,
-		.pBindings = &binding
+		.bindingCount = static_cast<uint32_t>(bindings.size()),
+		.pBindings = bindings.data()
 	};
 	
-	VkDescriptorPoolSize dpool
-	{
-		.type = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
-		.descriptorCount = max_bindless_textures
-	};
+	vkCreateDescriptorSetLayout(gpu_context->device, &layout_ci, nullptr, &gpu_context->bindless_descriptor_layout);
+
+	auto pool_sizes = std::to_array
+	({	
+ 		VkDescriptorPoolSize
+	       	{
+			.type = VK_DESCRIPTOR_TYPE_SAMPLER,
+			.descriptorCount = max_bindless_samplers
+		},	
+		VkDescriptorPoolSize
+		{
+			.type = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
+			.descriptorCount = max_bindless_textures
+		},
+		VkDescriptorPoolSize
+		{
+			.type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+			.descriptorCount = max_bindless_textures
+		}
+	});
 
 	VkDescriptorPoolCreateInfo pool_ci
 	{
@@ -933,55 +994,21 @@ void vulkan_setup_descriptor_heaps()
 		.pNext = nullptr,
 		.flags = VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT,
 		.maxSets = 1u,
-		.poolSizeCount = 1u,
-		.pPoolSizes = &dpool
+		.poolSizeCount = static_cast<uint32_t>(pool_sizes.size()),
+		.pPoolSizes = pool_sizes.data()
 	};
-
-	uint32_t max_binding = max_bindless_textures - 1;
-	VkDescriptorSetVariableDescriptorCountAllocateInfo vdc_alloc
-	{
-		.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_ALLOCATE_INFO,
-		.pNext = nullptr,
-		.descriptorSetCount = 1,
-		.pDescriptorCounts = &max_binding
-	};
+	vkCreateDescriptorPool(gpu_context->device, &pool_ci, nullptr, &gpu_context->bindless_descriptor_pool);
 
 	VkDescriptorSetAllocateInfo alloc_info
 	{
 		.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
-		.pNext = &vdc_alloc,
-		.descriptorSetCount = 1
+		.pNext = nullptr,
+		.descriptorPool = gpu_context->bindless_descriptor_pool,
+		.descriptorSetCount = 1u,
+		.pSetLayouts = &gpu_context->bindless_descriptor_layout
 	};
 
-	vkCreateDescriptorSetLayout(gpu_context->device, &layout_ci, nullptr, &gpu_context->bindless_texture_heap.layout);
-	vkCreateDescriptorPool(gpu_context->device, &pool_ci, nullptr, &gpu_context->bindless_texture_heap.pool);
-	
-	alloc_info.descriptorPool = gpu_context->bindless_texture_heap.pool;
-	alloc_info.pSetLayouts = &gpu_context->bindless_texture_heap.layout;
-	vkAllocateDescriptorSets(gpu_context->device, &alloc_info, &gpu_context->bindless_texture_heap.set);
-
-	binding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-	dpool.type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-
-	vkCreateDescriptorSetLayout(gpu_context->device, &layout_ci, nullptr, &gpu_context->bindless_rwtexture_heap.layout);
-	vkCreateDescriptorPool(gpu_context->device, &pool_ci, nullptr, &gpu_context->bindless_rwtexture_heap.pool);
-	
-	alloc_info.descriptorPool = gpu_context->bindless_rwtexture_heap.pool;
-	alloc_info.pSetLayouts = &gpu_context->bindless_rwtexture_heap.layout;
-	vkAllocateDescriptorSets(gpu_context->device, &alloc_info, &gpu_context->bindless_rwtexture_heap.set);
-
-	binding.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER;
-	binding.descriptorCount = max_bindless_samplers;
-	dpool.type = VK_DESCRIPTOR_TYPE_SAMPLER;
-	dpool.descriptorCount = max_bindless_samplers;
-	max_binding = max_bindless_samplers - 1;
-
-	vkCreateDescriptorSetLayout(gpu_context->device, &layout_ci, nullptr, &gpu_context->bindless_sampler_heap.layout);
-	vkCreateDescriptorPool(gpu_context->device, &pool_ci, nullptr, &gpu_context->bindless_sampler_heap.pool);
-	
-	alloc_info.descriptorPool = gpu_context->bindless_sampler_heap.pool;
-	alloc_info.pSetLayouts = &gpu_context->bindless_sampler_heap.layout;
-	vkAllocateDescriptorSets(gpu_context->device, &alloc_info, &gpu_context->bindless_sampler_heap.set);
+	vkAllocateDescriptorSets(gpu_context->device, &alloc_info, &gpu_context->bindless_descriptor_set);
 }
 
 bool gpu_init()
@@ -990,6 +1017,17 @@ bool gpu_init()
 
 	if(!vulkan_context_init())
 		return false;
+	
+	VkDescriptorSetLayoutCreateInfo layout_ci
+	{
+		.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+		.pNext = nullptr,
+		.flags = 0,
+		.bindingCount = 0u,
+		.pBindings = nullptr
+	};
+	
+	vkCreateDescriptorSetLayout(gpu_context->device, &layout_ci, nullptr, &gpu_context->empty_descriptor_layout);
 
 	vulkan_setup_descriptor_heaps();
 	
@@ -1040,13 +1078,11 @@ void gpu_shutdown()
 
 	gpu_destroy_texture(gpu_context->default_texture);
 
-	vkDestroyDescriptorPool(gpu_context->device, gpu_context->bindless_texture_heap.pool, nullptr);
-	vkDestroyDescriptorPool(gpu_context->device, gpu_context->bindless_rwtexture_heap.pool, nullptr);
-	vkDestroyDescriptorPool(gpu_context->device, gpu_context->bindless_sampler_heap.pool, nullptr);
-	vkDestroyDescriptorSetLayout(gpu_context->device, gpu_context->bindless_texture_heap.layout, nullptr);
-	vkDestroyDescriptorSetLayout(gpu_context->device, gpu_context->bindless_rwtexture_heap.layout, nullptr);
-	vkDestroyDescriptorSetLayout(gpu_context->device, gpu_context->bindless_sampler_heap.layout, nullptr);
-	
+	vkDestroyDescriptorPool(gpu_context->device, gpu_context->bindless_descriptor_pool, nullptr);
+	vkDestroyDescriptorSetLayout(gpu_context->device, gpu_context->bindless_descriptor_layout, nullptr);
+
+	vkDestroyDescriptorSetLayout(gpu_context->device, gpu_context->empty_descriptor_layout, nullptr);
+
 	for(auto& queue : gpu_context->queue_data)
 	{
 		for(auto& pool : queue.cmd_pools)
@@ -1371,8 +1407,8 @@ GPUTextureDescriptor gpu_texture_view_descriptor(const GPUTexture& tex, const GP
 	{
 		.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
 		.pNext = nullptr,
-		.dstSet = gpu_context->bindless_texture_heap.set,
-		.dstBinding = 0,
+		.dstSet = gpu_context->bindless_descriptor_set,
+		.dstBinding = 1,
 		.dstArrayElement = static_cast<uint32_t>(gpu_context->bindless_texture_heap.resources.size()),
 		.descriptorCount = 1,
 		.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
@@ -1404,8 +1440,8 @@ GPUTextureDescriptor gpu_rwtexture_view_descriptor(const GPUTexture& tex, const 
 	{
 		.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
 		.pNext = nullptr,
-		.dstSet = gpu_context->bindless_rwtexture_heap.set,
-		.dstBinding = 0,
+		.dstSet = gpu_context->bindless_descriptor_set,
+		.dstBinding = 2,
 		.dstArrayElement = static_cast<uint32_t>(gpu_context->bindless_rwtexture_heap.resources.size()),
 		.descriptorCount = 1,
 		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
@@ -1463,7 +1499,7 @@ GPUSampler gpu_create_sampler(const GPUSamplerDesc& desc)
 	{
 		.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
 		.pNext = nullptr,	
-		.dstSet = gpu_context->bindless_sampler_heap.set,
+		.dstSet = gpu_context->bindless_descriptor_set,
 		.dstBinding = 0,
 		.dstArrayElement = static_cast<uint32_t>(gpu_context->bindless_sampler_heap.resources.size()),
 		.descriptorCount = 1,
@@ -1685,56 +1721,24 @@ GPUSemaphore gpu_get_queue_timeline(GPUQueue queue)
 	};
 }
 
-VkDescriptorSetLayout shader_create_push_descriptor_set(const DescriptorSetLayoutKey& key)
+VkDescriptorSetLayout shader_create_push_descriptor_set(const Shader::CBufferInfo& info)
 {
-	constexpr size_t max_bindings = 16;
-
-        std::array<VkDescriptorSetLayoutBinding, max_bindings> bindings;
-        uint32_t num_bindings = 0;
-
-        for(uint32_t i = 0; i < max_bindings; i++)
-        {
-                VkShaderStageFlags stages;
-
-                if(key.vs_bindings & (1u << i))
-                        stages |= VK_SHADER_STAGE_VERTEX_BIT;
-                if(key.fs_bindings & (1u << i))
-                        stages |= VK_SHADER_STAGE_FRAGMENT_BIT;
-                if(key.cs_bindings & (1u << i))
-                        stages |= VK_SHADER_STAGE_COMPUTE_BIT;
-
-                if(stages & (VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_FRAGMENT_BIT))
-                        stages = VK_SHADER_STAGE_ALL;
-
-                if(!stages)
-                        continue;
-
-                VkDescriptorType type;
-                if(key.sampled_image_bindings & (1u << i))
-                        type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-                else if(key.storage_image_bindings & (1u << i))
-                        type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-                else if(key.separate_image_bindings & (1u << i))
-                        type = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
-                else if(key.sampler_bindings & (1u << i))
-                        type = VK_DESCRIPTOR_TYPE_SAMPLER;
-                else if(key.uniform_buffer_bindings & (1u << i))
-                        type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-                else if(key.storage_buffer_bindings & (1u << i))
-                        type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-                else
-                        std::unreachable();
-
-                bindings[num_bindings++] = {i, type, key.binding_arraysize[i], stages, nullptr};
-        }
+	const VkDescriptorSetLayoutBinding binding
+	{
+		.binding = 0,
+		.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+		.descriptorCount = 1u,
+		.stageFlags = shader_stage_to_vk_flags(info.stageFlags),
+		.pImmutableSamplers = nullptr
+	};
 
 	const VkDescriptorSetLayoutCreateInfo dsl_ci
 	{
 		.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
 		.pNext = nullptr,
 		.flags = VK_DESCRIPTOR_SET_LAYOUT_CREATE_PUSH_DESCRIPTOR_BIT,
-		.bindingCount = num_bindings,
-		.pBindings = bindings.data()
+		.bindingCount = 1u,
+		.pBindings = &binding
 	};
 
 	VkDescriptorSetLayout dsl;
@@ -1744,20 +1748,20 @@ VkDescriptorSetLayout shader_create_push_descriptor_set(const DescriptorSetLayou
 
 std::pair<VkPipelineLayout, uint64_t> shader_create_pipeline_layout(const Shader& shader)
 {	
-	std::array<VkDescriptorSetLayout, 4> ds_layouts;
+	std::array<VkDescriptorSetLayout, 2> ds_layouts;
 
-	uint32_t shader_num_dsl = 0;
-
-	ds_layouts[shader_num_dsl++] = gpu_context->bindless_texture_heap.layout;
-	ds_layouts[shader_num_dsl++] = gpu_context->bindless_rwtexture_heap.layout;
-	ds_layouts[shader_num_dsl++] = gpu_context->bindless_sampler_heap.layout;
-	
 	uint64_t pdsl_handle = 0;
-	if(!shader.dsl_keys[3].is_empty())
+	if(shader.cbuffer.size)
 	{
-		ds_layouts[shader_num_dsl++] = shader_create_push_descriptor_set(shader.dsl_keys[3]);
-		pdsl_handle = std::bit_cast<uint64_t>(ds_layouts[3]);
+		ds_layouts[0] = shader_create_push_descriptor_set(shader.cbuffer);
+		pdsl_handle = std::bit_cast<uint64_t>(ds_layouts[0]);
 	}
+	else
+	{
+		ds_layouts[0] = gpu_context->empty_descriptor_layout;
+	}
+
+	ds_layouts[1] = gpu_context->bindless_descriptor_layout;
 
 	const VkPushConstantRange s_pconst
 	{
@@ -1771,7 +1775,7 @@ std::pair<VkPipelineLayout, uint64_t> shader_create_pipeline_layout(const Shader
 		.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
 		.pNext = nullptr,
 		.flags = 0,
-		.setLayoutCount = shader_num_dsl,
+		.setLayoutCount = 2u,
 		.pSetLayouts = ds_layouts.data(),
 		.pushConstantRangeCount = shader.pconst.size ? 1u : 0u,
 		.pPushConstantRanges = shader.pconst.size ? &s_pconst : nullptr
@@ -1785,6 +1789,7 @@ std::pair<VkPipelineLayout, uint64_t> shader_create_pipeline_layout(const Shader
 GPUPipeline gpu_create_compute_pipeline(const Shader& shader)
 {
 	auto [layout, pdsl_handle] = shader_create_pipeline_layout(shader);
+
 	const VkShaderModuleCreateInfo sm_info
 	{
 		.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
@@ -1822,6 +1827,7 @@ GPUPipeline gpu_create_compute_pipeline(const Shader& shader)
 		std::bit_cast<uint64_t>(pipe),
 		std::bit_cast<uint64_t>(layout),
 		pdsl_handle,
+		static_cast<uint32_t>(shader.cbuffer.size),
 		static_cast<uint32_t>(shader_stage_to_vk_flags(shader.pconst.stageFlags)),
 		static_cast<uint32_t>(shader.pconst.size),
 		true
@@ -2016,6 +2022,7 @@ GPUPipeline gpu_create_graphics_pipeline(const Shader& shader, const GPURasterDe
 		std::bit_cast<uint64_t>(pipe),
 		std::bit_cast<uint64_t>(layout),
 		pdsl_handle,
+		static_cast<uint32_t>(shader.cbuffer.size),
 		static_cast<uint32_t>(shader_stage_to_vk_flags(shader.pconst.stageFlags)),
 		static_cast<uint32_t>(shader.pconst.size),
 		false
@@ -2209,21 +2216,42 @@ void gpu_set_pipeline(GPUCommandBuffer& cmd, GPUPipeline& pipe)
 	auto cb = std::bit_cast<VkCommandBuffer>(cmd.handle);
 	cmd.bound_pipe = &pipe;
 
-	std::array<VkDescriptorSet, 4> sets;
-	uint32_t ds_count = 0;
-
-	sets[ds_count++] = gpu_context->bindless_texture_heap.set;
-	sets[ds_count++] = gpu_context->bindless_rwtexture_heap.set;
-	sets[ds_count++] = gpu_context->bindless_sampler_heap.set;
-
-	if(pipe.pdsl_handle)
-		sets[ds_count++] = std::bit_cast<VkDescriptorSet>(pipe.pdsl_handle);
-
 	auto bindpoint = pipe.is_compute ? VK_PIPELINE_BIND_POINT_COMPUTE : VK_PIPELINE_BIND_POINT_GRAPHICS;
 	vkCmdBindPipeline(cb, bindpoint, std::bit_cast<VkPipeline>(pipe.pso));
 
-	vkCmdBindDescriptorSets(cb, bindpoint, std::bit_cast<VkPipelineLayout>(pipe.layout), 0u, ds_count, sets.data(), 0u, nullptr);
+	vkCmdBindDescriptorSets(cb, bindpoint, std::bit_cast<VkPipelineLayout>(pipe.layout), 1u, 1u, &gpu_context->bindless_descriptor_set, 0u, nullptr);
 }
+
+void gpu_write_cbuffer_descriptor(const GPUCommandBuffer& cmd, const GPUPointer& cbuffer)
+{
+	assert(cmd.bound_pipe);
+	assert(cmd.bound_pipe->pdsl_handle);
+	assert(cbuffer.handle);
+
+	const VkDescriptorBufferInfo cbuffer_info
+	{
+		.buffer = gpu_context->buffers[cbuffer.handle - 1].handle,
+		.offset = cbuffer.offset,
+		.range = VK_WHOLE_SIZE
+	};
+
+	const VkWriteDescriptorSet ds_write
+	{
+		.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+		.pNext = nullptr,
+		.dstSet = VK_NULL_HANDLE,
+		.dstBinding = 0,
+		.dstArrayElement = 0,
+		.descriptorCount = 1u,
+		.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+		.pImageInfo = nullptr,
+		.pBufferInfo = &cbuffer_info,
+		.pTexelBufferView = nullptr
+	};
+
+	auto bindpoint = cmd.bound_pipe->is_compute ? VK_PIPELINE_BIND_POINT_COMPUTE : VK_PIPELINE_BIND_POINT_GRAPHICS;
+	vkCmdPushDescriptorSet(std::bit_cast<VkCommandBuffer>(cmd.handle), bindpoint, std::bit_cast<VkPipelineLayout>(cmd.bound_pipe->layout), 0u, 1u, &ds_write);
+}	
 
 void gpu_dispatch(const GPUCommandBuffer& cmd, void* data, uvec3 dim)
 {
@@ -2462,7 +2490,6 @@ void gpu_create_swapchain()
 
 	VkSurfaceFormatKHR format = choose_swapchain_format(formats);	
 	VkExtent2D extent = find_swapchain_extent(capabilities);
-	gpu_context->swapchain_pmode = VK_PRESENT_MODE_FIFO_KHR; 
 
 	VkSwapchainCreateInfoKHR swapchain_ci
 	{
@@ -2523,6 +2550,7 @@ void gpu_swapchain_init(Window& wnd)
 		return;
 	}
 
+	gpu_context->swapchain_pmode = VK_PRESENT_MODE_FIFO_KHR; 
 	gpu_create_swapchain();
 	gpu_context->swapchain_dirty = false;
 }
@@ -2590,9 +2618,16 @@ void gpu_swapchain_present(GPUQueue queue, GPUSemaphore& sem)
 		log::warn("vkQueuePresentKHR returned {}", string_VkResult(result));
 }
 
-bool gpu_swapchain_set_present_mode()
+bool gpu_swapchain_set_present_mode(GPUPresentMode mode)
 {
-	return false;
+	auto new_mode = present_mode_to_vk(mode);
+
+	if(gpu_context->swapchain_pmode == new_mode)
+		return true;
+
+	gpu_context->swapchain_pmode = new_mode;
+	gpu_context->swapchain_dirty = true;
+	return true;
 }
 
 }

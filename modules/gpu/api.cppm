@@ -38,6 +38,7 @@ enum GPUSemaphoreType { GPU_SEMAPHORE_TIMELINE, GPU_SEMAPHORE_BINARY };
 enum GPULoadOP { GPU_LOAD_OP_LOAD, GPU_LOAD_OP_CLEAR, GPU_LOAD_OP_DONTCARE };
 enum GPUStoreOP { GPU_STORE_OP_STORE, GPU_STORE_OP_DONTCARE };
 enum GPUIndexType { GPU_INDEX_TYPE_U32, GPU_INDEX_TYPE_U16, GPU_INDEX_TYPE_U8 };
+enum GPUPresentMode { GPU_PRESENT_MODE_FIFO, GPU_PRESENT_MODE_FIFO_RELAXED, GPU_PRESENT_MODE_IMMEDIATE };
 
 enum GPUTextureUsage : uint32_t
 {
@@ -155,6 +156,7 @@ struct GPUPipeline
 	uint64_t pso;
 	uint64_t layout;
 	uint64_t pdsl_handle;
+	uint32_t cbuffer_size;
 	uint32_t pconst_stage;
 	uint32_t pconst_size;
 	bool is_compute;
@@ -263,6 +265,7 @@ void gpu_wait_signal(GPUCommandBuffer& cmd, GPUStage dst_stage, GPUSemaphore& se
 void gpu_emit_signal(GPUCommandBuffer& cmd, GPUStage src_stage, GPUSemaphore& sem, uint64_t timeline);
 
 void gpu_set_pipeline(GPUCommandBuffer& cmd, GPUPipeline& pipe);
+void gpu_write_cbuffer_descriptor(const GPUCommandBuffer& cmd, const GPUPointer& cbuffer);
 
 void gpu_dispatch(const GPUCommandBuffer& cmd, void* data, uvec3 dim);
 void gpu_dispatch_indirect(const GPUCommandBuffer& cmd, void* data, const GPUPointer& dim);
@@ -280,6 +283,7 @@ void gpu_draw_indexed(const GPUCommandBuffer& cmd, void* data, uint32_t index_co
 void gpu_swapchain_init(Window& wnd);
 GPUTextureDescriptor* gpu_swapchain_acquire_next(GPUSemaphore& sem);
 void gpu_swapchain_present(GPUQueue queue, GPUSemaphore& sem);
+bool gpu_swapchain_set_present_mode(GPUPresentMode mode);
 
 constexpr GPUTextureUsage operator|(GPUTextureUsage lhs, GPUTextureUsage rhs)
 {

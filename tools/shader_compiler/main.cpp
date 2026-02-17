@@ -1,8 +1,8 @@
-import std;
-import penumbra.gpu;
-
 #include "slang-com-ptr.h"
 #include "slang.h"
+
+import std;
+import penumbra.gpu;
 
 using std::uint32_t, std::size_t;
 using Slang::ComPtr;
@@ -10,7 +10,8 @@ using namespace std::literals::string_view_literals;
 
 struct CompileContext
 {
-	std::array<penumbra::DescriptorSetLayoutKey, 4> dsl_keys;
+	uint32_t cbuffer_stages = 0;
+	uint32_t cbuffer_size = 0;
 	uint32_t pconst_stages = 0;
 	uint32_t pconst_size = 0;
 
@@ -24,151 +25,27 @@ struct CompileContext
 
 void reflect_parameter(uint32_t space, size_t offset, slang::VariableLayoutReflection* param, slang::BindingType btype, CompileContext& ctx)
 {
-	ctx.dsl_keys[space].binding_arraysize[offset] = 1;
-
 	auto ptype = param->getTypeLayout();
        	switch(ptype->getKind())
 	{
 	using enum slang::TypeReflection::Kind;
 	case ConstantBuffer:
 	{
-		std::print("ConstantBuffer");
-		ctx.dsl_keys[space].uniform_buffer_bindings |= (1 << offset);
-		break;
-	}
-	case ShaderStorageBuffer:
-	{
-		std::print("SSBO");
-		ctx.dsl_keys[space].storage_buffer_bindings |= (1 << offset);
-		break;
-	}
-	case SamplerState:
-	{
-		std::print("SamplerState");
-		ctx.dsl_keys[space].sampler_bindings |= (1 << offset);
-		break;
-	}
-	case Resource:
-	{
-		auto shape = ptype->getResourceShape();
-	       	auto bshape = shape & SLANG_RESOURCE_BASE_SHAPE_MASK;
-		if(bshape == SLANG_STRUCTURED_BUFFER)
-		{
-			if(btype == slang::BindingType::RawBuffer)
-				std::print("StructuredBuffer");
-			else if(btype == slang::BindingType::MutableRawBuffer)
-				std::print("RWStructuredBuffer");
+		ptype = ptype->getElementTypeLayout();
+		ctx.cbuffer_size = ptype->getSize();
 
-			ctx.dsl_keys[space].storage_buffer_bindings |= (1 << offset);
-		}
-		else if(bshape == SLANG_TEXTURE_2D || bshape == SLANG_TEXTURE_CUBE)
-		{
-			bool cube = (bshape == SLANG_TEXTURE_CUBE);
-			if(btype == slang::BindingType::CombinedTextureSampler)
-			{
-				std::print("{}", cube ? "SamplerCube" : "Sampler2D");
-				ctx.dsl_keys[space].sampled_image_bindings |= (1 << offset);
-			}
-			else if(btype == slang::BindingType::Texture)
-			{
-				std::print("{}", cube ? "TextureCube" : "Texture2D");
-				ctx.dsl_keys[space].separate_image_bindings |= (1 << offset);
-			}
-			else if(btype == slang::BindingType::MutableTexture)
-			{
-				std::print("{}", cube ? "RWTextureCube" : "RWTexture2D");
-				ctx.dsl_keys[space].storage_image_bindings |= (1 << offset);
-			}
-		}
-		else
-			std::print("Resource");
-		break;
-	}
-	case Array:
-	{
-		auto atl = param->getTypeLayout();
-		auto aparam = atl->getElementTypeLayout();
-		if(aparam->getKind() == slang::TypeReflection::Kind::Resource)
-		{
-			auto shape = aparam->getResourceShape();
-			auto bshape = shape & SLANG_RESOURCE_BASE_SHAPE_MASK;
-			if(bshape == SLANG_TEXTURE_2D || bshape == SLANG_TEXTURE_CUBE)
-			{
-				bool cube = (bshape == SLANG_TEXTURE_CUBE);
-				ctx.dsl_keys[space].binding_arraysize[offset] = atl->getElementCount();
-				if(atl->getElementCount() == 0)
-					ctx.dsl_keys[space].variable_bindings |= (1 << offset);
-				
-				if(btype == slang::BindingType::CombinedTextureSampler)
-				{
-					std::print("{}[{}]", cube ? "SamplerCube" : "Sampler2D", atl->getElementCount());
-					ctx.dsl_keys[space].sampled_image_bindings |= (1 << offset);
-				}
-				else if(btype == slang::BindingType::Texture)
-				{
-					std::print("{}[{}]", cube ? "TextureCube" : "Texture2D", atl->getElementCount());
-					ctx.dsl_keys[space].separate_image_bindings |= (1 << offset);
-				}
-				else if(btype == slang::BindingType::MutableTexture)
-				{
-					std::print("{}[{}]", cube ? "RWTextureCube" : "RWTexture2D", atl->getElementCount());
-					ctx.dsl_keys[space].storage_image_bindings |= (1 << offset);
-				}
-			}
-			else
-				std::print("Resource[{}]", atl->getElementCount());
-		}
-		else
-			std::print("Array of {}", std::to_underlying(aparam->getKind()));
+		std::print("ConstantBuffer<{}> size {}", ptype->getType()->getName(), ctx.cbuffer_size);
 		break;
 	}
 	default:
-		std::print("Resource");
+		std::print("Unsupported resource");
 	}
 
 	std::print(" stages");
-	auto* var = param->getVariable();
-	auto uattr_count = var->getUserAttributeCount();
-	for(uint32_t i = 0; i < uattr_count; i++)
-	{
-		auto* attr = var->getUserAttributeByIndex(i);
-		if(std::string_view{attr->getName()} == "ForceShaderStage"sv)
-		{
-			size_t argsize;
-			std::string_view val{attr->getArgumentValueString(0, &argsize)};
-			if(val == "all"sv || val == "vertex"sv)
-			{
-				ctx.dsl_keys[space].vs_bindings |= (1 << offset);
-				std::print(" VS");
-			}
-			
-			if(val == "all"sv || val == "fragment"sv)
-			{
-				ctx.dsl_keys[space].fs_bindings |= (1 << offset);
-				std::print(" FS");
-			}
-			
-			if(val == "all"sv || val == "compute"sv)
-			{
-				ctx.dsl_keys[space].cs_bindings |= (1 << offset);
-				std::print(" CS");
-			}
-
-			return;
-		}
-	}
 
 	auto pc = static_cast<SlangParameterCategory>(param->getCategoryByIndex(0));
 	for(uint32_t i = 0; i < ctx.ep_count; i++)
 	{
-		if(ctx.dsl_keys[space].variable_bindings & (1 << offset))
-		{
-			ctx.dsl_keys[space].fs_bindings |= (1 << offset);
-			ctx.dsl_keys[space].cs_bindings |= (1 << offset);
-			std::print("ALL [BINDLESS]");
-			break;
-		}
-
 		bool is_used = false;
 		ctx.stage_meta[i]->isParameterLocationUsed(pc, space, offset, is_used);
 		if(is_used)
@@ -176,17 +53,17 @@ void reflect_parameter(uint32_t space, size_t offset, slang::VariableLayoutRefle
 			if(ctx.ep_types[i] == 0)
 			{
 				std::print(" VS");
-				ctx.dsl_keys[space].vs_bindings |= (1 << offset);
+				ctx.cbuffer_stages |= penumbra::SHADER_STAGE_VERTEX;
 			}
 			else if(ctx.ep_types[i] == 1)
 			{
 				std::print(" FS");
-				ctx.dsl_keys[space].fs_bindings |= (1 << offset);
+				ctx.cbuffer_stages |= penumbra::SHADER_STAGE_FRAGMENT;
 			}
 			else if(ctx.ep_types[i] == 2)
 			{
 				std::print(" CS");
-				ctx.dsl_keys[space].cs_bindings |= (1 << offset);
+				ctx.cbuffer_stages |= penumbra::SHADER_STAGE_COMPUTE;
 			}
 		}
 	}	
@@ -262,11 +139,6 @@ int main(int argc, const char** argv)
 		return 1;
 
 	CompileContext ctx;
-	for(auto& dsl_key : ctx.dsl_keys)
-	{
-		for(auto& binding : dsl_key.binding_arraysize)
-			binding = 0;
-	}
 
 	auto check_stage = [slang_module, &session, &ctx](const char* entry, uint32_t eptype) -> bool
 	{
@@ -343,54 +215,6 @@ int main(int argc, const char** argv)
 						else
 							std::println("field {} is not descriptor", field);
 					}	
-				}
-				else if(elem_typelayout->getKind() == slang::TypeReflection::Kind::Array)
-				{
-
-					auto aparam = elem_typelayout->getElementTypeLayout();	
-					std::print("space {} binding 0 - {} is ", index, aparam->getName());
-					if(aparam->getKind() == slang::TypeReflection::Kind::Resource)
-					{
-						auto shape = aparam->getResourceShape();
-						auto bshape = shape & SLANG_RESOURCE_BASE_SHAPE_MASK;
-						if(bshape == SLANG_TEXTURE_2D || bshape == SLANG_TEXTURE_CUBE)
-						{
-							bool cube = (bshape == SLANG_TEXTURE_CUBE);
-							auto btype = elem_typelayout->getBindingRangeType(0);
-							ctx.dsl_keys[index].binding_arraysize[0] = elem_typelayout->getElementCount();
-							if(elem_typelayout->getElementCount() == 0)
-								ctx.dsl_keys[index].variable_bindings |= 1;
-							if(btype == slang::BindingType::CombinedTextureSampler)
-							{
-								std::print("{}[{}]", cube ? "SamplerCube" : "Sampler2D", elem_typelayout->getElementCount());
-								ctx.dsl_keys[index].sampled_image_bindings |= 1;
-							}
-							else if(btype == slang::BindingType::Texture)
-							{
-								std::print("{}[{}]", cube ? "TextureCube" : "Texture2D", elem_typelayout->getElementCount());
-								ctx.dsl_keys[index].separate_image_bindings |= 1;
-							}
-							else if(btype == slang::BindingType::MutableTexture)
-							{
-								std::print("{}[{}]", cube ? "RWTextureCube" : "RWTexture2D", elem_typelayout->getElementCount());
-								ctx.dsl_keys[index].storage_image_bindings |= 1;
-							}
-						}
-						else
-							std::print("Resource[{}]", elem_typelayout->getElementCount());
-					}
-					else
-						std::print("Array");
-
-					// HACK: resource arrays inlined into parameter blocks do not register as used in any shader stage, force usage in either FS or CS
-					for(uint32_t ep = 0; ep < ctx.ep_count; ep++)
-					{
-						ctx.dsl_keys[index].vs_bindings |= 1;
-						ctx.dsl_keys[index].fs_bindings |= 1;
-						ctx.dsl_keys[index].cs_bindings |= 1;
-						std::print(" ALL");
-					}
-					std::println();
 				}
 			}
 			else
@@ -484,20 +308,12 @@ int main(int argc, const char** argv)
 	std::array<uint32_t, 5> code_offsets;
 
 	ShaderFileFormat::Header header;
+	header.cbuffer_stages = ctx.cbuffer_stages;
+	header.cbuffer_size = ctx.cbuffer_size;
 	header.pcb_size = ctx.pconst_size;
 	header.pcb_stages = ctx.pconst_stages;
 	header.num_stages = ctx.ep_count;
 	out.seekp(sizeof(ShaderFileFormat::Header) + sizeof(ShaderFileFormat::ShaderStage) * ctx.ep_count);
-	uint32_t num_dslkeys = 0;
-	for(uint32_t i = 0u; i < 4u; i++)
-	{
-		if(ctx.dsl_keys[i].is_empty())
-			break;
-
-		out.write(reinterpret_cast<const char*>(&ctx.dsl_keys[i]), sizeof(DescriptorSetLayoutKey));
-		num_dslkeys++;
-	}
-	header.num_dslkeys = num_dslkeys;
 	
 	for(uint32_t i = 0; i < ctx.ep_count; i++)
 	{

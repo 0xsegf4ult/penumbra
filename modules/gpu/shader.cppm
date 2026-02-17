@@ -8,34 +8,6 @@ using std::uint8_t, std::uint16_t, std::uint32_t, std::size_t;
 namespace penumbra
 {
 
-export struct DescriptorSetLayoutKey
-{
-	static constexpr size_t max_bindings = 16;
-
-	uint16_t sampled_image_bindings{0};
-	uint16_t storage_image_bindings{0};
-	uint16_t separate_image_bindings{0};
-	uint16_t sampler_bindings{0};
-	uint16_t uniform_buffer_bindings{0};
-	uint16_t storage_buffer_bindings{0};
-	uint16_t vs_bindings{0};
-	uint16_t fs_bindings{0};
-	uint16_t cs_bindings{0};
-	uint16_t variable_bindings{0};
-
-	uint8_t binding_arraysize[16];
-
-	[[nodiscard]] constexpr bool is_empty() const noexcept
-	{
-		return sampled_image_bindings == 0 && storage_image_bindings == 0 && separate_image_bindings == 0 && sampler_bindings == 0 && uniform_buffer_bindings == 0 && storage_buffer_bindings == 0;
-	}
-	
-	bool operator==(const DescriptorSetLayoutKey& other) const noexcept
-	{
-		return std::memcmp(this, &other, sizeof(DescriptorSetLayoutKey)) == 0;
-	}
-};
-
 export enum ShaderPipelineStage : uint32_t
 {
 	SHADER_STAGE_INVALID = 0,
@@ -46,8 +18,8 @@ export enum ShaderPipelineStage : uint32_t
 
 export struct ShaderFileFormat
 {
-	constexpr static uint32_t fmt_magic = 0x4c48534c;
-	constexpr static uint32_t fmt_major_version = 1u;
+	constexpr static uint32_t fmt_magic = 0x4c485350;
+	constexpr static uint32_t fmt_major_version = 2u;
 	constexpr static uint32_t fmt_minor_version = 0u;
 
 	struct Header
@@ -55,9 +27,10 @@ export struct ShaderFileFormat
 		uint32_t magic{fmt_magic};
 		uint32_t vmajor{fmt_major_version};
 		uint32_t vminor{fmt_minor_version};
-		uint32_t num_dslkeys;
-		uint32_t pcb_size;
+		uint32_t cbuffer_stages{SHADER_STAGE_INVALID};
+		uint32_t cbuffer_size{0};
 		uint32_t pcb_stages;
+		uint32_t pcb_size;
 		uint32_t num_stages;
 	};
 
@@ -79,7 +52,12 @@ export struct Shader
 	};
 	std::array<ShaderStage, max_shader_stages> stages;
 
-	std::array<DescriptorSetLayoutKey, 4> dsl_keys{};
+	struct CBufferInfo
+	{
+		ShaderPipelineStage stageFlags;
+		uint32_t size;
+	} cbuffer;
+
 	struct PushConstantRange
 	{
 		ShaderPipelineStage stageFlags;
@@ -102,6 +80,9 @@ export std::expected<Shader, std::string_view> load_shader(const vfs::path& path
 	if(header->magic != ShaderFileFormat::fmt_magic || header->vmajor != ShaderFileFormat::fmt_major_version)
 		return std::unexpected("invalid file");
 
+	res.cbuffer.stageFlags = ShaderPipelineStage{header->cbuffer_stages};
+	res.cbuffer.size = header->cbuffer_size;
+
 	res.pconst.stageFlags = ShaderPipelineStage{header->pcb_stages};
 	res.pconst.size = header->pcb_size;
 
@@ -112,13 +93,6 @@ export std::expected<Shader, std::string_view> load_shader(const vfs::path& path
 		res.stages[i].pipeline_stage = ShaderPipelineStage{stage.stage};
 		res.stages[i].spirv.resize(stage.code_size / sizeof(uint32_t));
 		std::memcpy(res.stages[i].spirv.data(), shader_data + stage.code_offset, stage.code_size);
-	}
-
-	const auto* dsl_keys = reinterpret_cast<const std::byte*>(shader_data + sizeof(ShaderFileFormat::Header) + sizeof(ShaderFileFormat::ShaderStage) * header->num_stages);
-	for(uint32_t i = 0; i < header->num_dslkeys; i++)
-	{
-		std::memcpy(&res.dsl_keys[i], dsl_keys, sizeof(DescriptorSetLayoutKey));
-		dsl_keys += sizeof(DescriptorSetLayoutKey);
 	}
 
 	return res;

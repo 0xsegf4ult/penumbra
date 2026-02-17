@@ -1,18 +1,63 @@
 #pragma once
 
-[[allow("parameterBindingsOverlap")]]
-[[vk::binding(0, 0)]]
-Texture2D[] texture_heap;
+export T getDescriptorFromHandle<T>(DescriptorHandle<T> handle) where T : IOpaqueDescriptor
+{
+        switch(T.kind)
+        {
+        case DescriptorKind.Sampler:
+                return __getDynamicResourceHeap<T>(0)[((uint2)handle).x];
+        case DescriptorKind.Texture:
+        {
+                if(T.descriptorAccess == DescriptorAccess.Read)
+                        return __getDynamicResourceHeap<T>(1)[((uint2)handle).x];
+                else
+                        return __getDynamicResourceHeap<T>(2)[((uint2)handle).x];
+        }
+        default:
+                // should never happen
+                return __getDynamicResourceHeap<T>(3)[0];
+        }
+}
 
-[[allow("parameterBindingsOverlap")]]
-[[vk::binding(0, 0)]]
-TextureCube[] cube_texture_heap;
+struct ResourceHandle<T> where T: IOpaqueDescriptor
+{
+        private uint inner;
 
-[[vk::binding(0, 1)]]
-RWTexture2D[] rwtexture_heap;
+	__init()
+	{
+		inner = 0;
+	}
 
-[[vk::binding(0, 2)]]
-SamplerState[] sampler_heap;
+	__init(uint value)
+	{
+		inner = value;
+	}
+
+        property DescriptorHandle<T> desc
+        {
+                get {
+                        return (DescriptorHandle<T>)uint2(inner, 0);
+                }
+
+        }
+};
+
+uint SubgroupID()
+{
+	return spirv_asm
+	{
+		result: $$uint = OpLoad builtin(SubgroupId:uint);
+	};
+}
+
+uint WavePrefixInclusiveAdd(uint sum)
+{
+	return spirv_asm
+	{
+		OpCapability GroupNonUniformArithmetic;
+		OpGroupNonUniformIAdd $$uint result Subgroup 1 $sum;
+	};
+}
 
 uint pack_rgba(float4 value)
 {
@@ -43,3 +88,4 @@ float3 remove_srgb_curve(float3 x)
 {
         return select(x < 0.04045, x / 12.92, -7.43605 * x - 31.24297 * sqrt(-0.53792 * x + 1.279924) + 35.34864);
 }
+

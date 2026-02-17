@@ -39,6 +39,7 @@ struct imgui_renderer_penumbra_gpu
 
 	GPUPointer vertex_data;
 	GPUPointer index_data;
+	std::array<GPUPointer, 2> cbuf_matrix;
 
 	int frame_index;
 };
@@ -169,6 +170,9 @@ export bool imgui_backend_init(Window* window)
 	rd->vertex_data = gpu_allocate_memory(sizeof(ImDrawVert) * max_vertices * 2, GPU_MEMORY_HOST, GPU_BUFFER_VERTEX);
 	rd->index_data = gpu_allocate_memory(sizeof(ImDrawIdx) * max_indices * 2, GPU_MEMORY_HOST, GPU_BUFFER_INDEX);
 
+	for(int i = 0; i < 2; i++)
+		rd->cbuf_matrix[i] = gpu_allocate_memory(sizeof(mat4), GPU_MEMORY_HOST, GPU_BUFFER_UNIFORM);
+
 	auto shader = load_shader("shaders/imgui");
 	if(!shader.has_value())
 	{
@@ -201,6 +205,9 @@ export void imgui_backend_shutdown()
 	auto* rd = reinterpret_cast<imgui_renderer_penumbra_gpu*>(io.BackendRendererUserData);
 
 	gpu_destroy_pipeline(rd->pso);
+	for(int i = 0; i < 2; i++)
+		gpu_free_memory(rd->cbuf_matrix[i]);
+
 	gpu_free_memory(rd->index_data);
 	gpu_free_memory(rd->vertex_data);
 	gpu_destroy_texture(rd->font_texture);
@@ -272,12 +279,15 @@ export void imgui_backend_render(GPUCommandBuffer& cmd, double dt)
 
 	struct ShaderData
 	{
-		mat4 proj;
 		GPUDevicePointer vertex_data;
 		uint32_t textureID;
 	} shader_data;
 	shader_data.vertex_data = gpu_host_to_device_pointer(rd->vertex_data);
-	shader_data.proj = mat4::make_ortho(0.0f, io.DisplaySize.x, io.DisplaySize.y, 0.0f, 0.0f, 1.0f);
+	
+	auto proj = mat4::make_ortho(0.0f, io.DisplaySize.x, io.DisplaySize.y, 0.0f, 0.0f, 1.0f);
+	memcpy(gpu_map_memory(rd->cbuf_matrix[rd->frame_index]), &proj, sizeof(mat4));
+	gpu_write_cbuffer_descriptor(cmd, rd->cbuf_matrix[rd->frame_index]);
+	
 	gpu_bind_index_buffer(cmd, rd->index_data, GPU_INDEX_TYPE_U16);
 
 	uint32_t g_vtx_offset = rd->frame_index * max_vertices;
