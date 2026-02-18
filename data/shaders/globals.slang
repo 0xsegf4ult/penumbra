@@ -89,3 +89,11 @@ float3 remove_srgb_curve(float3 x)
         return select(x < 0.04045, x / 12.92, -7.43605 * x - 31.24297 * sqrt(-0.53792 * x + 1.279924) + 35.34864);
 }
 
+uint2 remap_lane_8x8(uint lane)
+{
+        return uint2 (
+                bitfieldInsert(bitfieldExtract(lane, 2, 3), lane, 0, 1),
+                bitfieldInsert(bitfieldExtract(lane, 3, 3), bitfieldExtract(lane, 1, 2), 0, 2)
+        );
+}
+

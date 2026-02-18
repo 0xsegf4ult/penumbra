@@ -5,6 +5,7 @@ module;
 
 module penumbra.renderer;
 import :geometry_buffer;
+import :render_world;
 
 import penumbra.core;
 import penumbra.gpu;
@@ -30,6 +31,12 @@ struct renderer_context_t
 
 	GPUSemaphore transfer_resource_semaphore;
 	uint64_t transfer_resource_sync{0};
+
+	RenderWorld render_world;
+	RenderView camera_view;
+	mat4 camera_matrix;
+
+	std::array<GPUPointer, config::renderer_frames_in_flight> camera_cbv;
 };
 
 renderer_context_t* renderer = nullptr;
@@ -57,11 +64,21 @@ void renderer_init(Window& wnd)
 	imgui_backend_init(renderer->window);
 
 	renderer_geometry_init();
+
+	renderer->render_world.init();
+	renderer->camera_view = renderer->render_world.register_view();
+
+	for(int i = 0; i < config::renderer_frames_in_flight; i++)
+		renderer->camera_cbv[i] = gpu_allocate_memory(sizeof(mat4), GPU_MEMORY_MAPPED, GPU_BUFFER_UNIFORM);
+
 }
 
 void renderer_shutdown()
 {
 	gpu_wait_idle();
+
+	for(auto& cbv : renderer->camera_cbv)
+		gpu_free_memory(cbv);
 
 	renderer_geometry_shutdown();
 
@@ -115,6 +132,9 @@ void renderer_process_frame(double dt)
 	gpu_wait_signal(cmd, GPU_STAGE_RASTER_OUTPUT, renderer->swapchain_acquire[renderer->frame_index], 0);
 	gpu_texture_layout_transition(cmd, renderer->cur_swapchain, GPU_STAGE_RASTER_OUTPUT, GPU_STAGE_RASTER_OUTPUT, GPU_TEXTURE_LAYOUT_UNDEFINED, GPU_TEXTURE_LAYOUT_GENERAL);
 
+	renderer->render_world.upload_objects(cmd);
+	renderer->render_world.determine_visibility(cmd);
+
 	gpu_begin_renderpass(cmd,
 	{
 		.color_targets =
@@ -146,6 +166,22 @@ uint32_t renderer_gfx_frame_index()
 uint64_t renderer_resource_transfer_syncval()
 {
 	return renderer->transfer_resource_sync;
+}
+
+RenderObject renderer_world_insert_object(const RenderObjectDescription& data)
+{
+	return renderer->render_world.insert_object(data, {renderer->camera_view});
+}
+
+RenderBucketData renderer_world_get_bucket(RenderView view, RenderBucket bucket)
+{
+	return renderer->render_world.get_bucket(view, bucket);
+}
+
+void renderer_update_camera_matrices(const mat4& view, const mat4& proj)
+{
+	renderer->camera_matrix = view * proj;
+	renderer->render_world.update_view_camera(renderer->camera_view, view, proj);
 }
 
 }

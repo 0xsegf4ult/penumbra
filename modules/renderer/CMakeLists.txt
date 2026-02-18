@@ -7,5 +7,6 @@ target_sources(penumbra_renderer PUBLIC FILE_SET CXX_MODULES
 	api.cppm
 	geometry_buffer.cppm
 	mod.cppm
+	render_world.cppm
 	PRIVATE
 	impl.cpp)
