@@ -8,6 +8,9 @@ FetchContent_MakeAvailable(spdlog)
 
 add_subdirectory("imgui-port")
 
+FetchContent_Declare(entt URL https://github.com/skypjack/entt/archive/refs/tags/v3.16.0.zip)
+FetchContent_MakeAvailable(entt)
+
 FetchContent_Declare(tracy URL https://github.com/wolfpld/tracy/archive/refs/tags/v0.13.1.zip)
 set(TRACY_LTO ON CACHE BOOL "" FORCE)
 set(TRACY_ENABLE ${PENUMBRA_ENABLE_TRACY})
