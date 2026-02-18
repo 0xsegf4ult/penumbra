@@ -6,6 +6,7 @@ target_sources(editor PUBLIC FILE_SET CXX_MODULES
 	core.cppm
 	widgets/inspector.cppm
 	widgets/scenegraph.cppm
+	widgets/viewport.cppm
 	widgets/widget.cppm
 	world/components/camera.cppm
 	world/components/lights.cppm

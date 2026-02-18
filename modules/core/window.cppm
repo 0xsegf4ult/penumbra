@@ -91,6 +91,13 @@ public:
 
 		SDL_Event event;
 
+		float mx, my;
+		SDL_GetGlobalMouseState(&mx, &my);
+		vec2 mpos{mx, my};
+
+		mouse_delta = mpos - mouse_pos;
+		mouse_pos = mpos;
+
 		while(SDL_PollEvent(&event))
 		{
 			switch(event.type)
@@ -137,6 +144,16 @@ public:
 				break;
 			}
 		}
+	}
+
+	vec2 get_mouse_pos() const
+	{
+		return mouse_pos;
+	}
+
+	vec2 get_mouse_delta() const
+	{
+		return mouse_delta;
 	}
 
 	SDL_Window* native_handle() const
@@ -198,6 +215,9 @@ private:
 	uvec2 size;
 
 	bool req_close{false};
+	
+	vec2 mouse_pos{0.0f};
+	vec2 mouse_delta{0.0f};
 
 	std::vector<text_event_callback> text_event_listeners;
         std::vector<mouse_button_event_callback> mouse_button_event_listeners;

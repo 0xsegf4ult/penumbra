@@ -37,6 +37,19 @@ struct renderer_context_t
 	mat4 camera_matrix;
 
 	std::array<GPUPointer, config::renderer_frames_in_flight> camera_cbv;
+
+	uvec2 render_resolution{800u, 600u};
+
+	GPUTexture visbuffer_tex;
+	GPUTexture depthbuffer_tex;
+	GPUTexture framebuffer_tex;
+	GPUTextureDescriptor visbuffer;
+	GPUTextureDescriptor depthbuffer;
+	GPUTextureDescriptor framebuffer;
+	GPUTextureDescriptor framebuffer_rw;
+
+	GPUPipeline visbuffer_build_pso;
+	GPUPipeline vb_visualize_cs;
 };
 
 renderer_context_t* renderer = nullptr;
@@ -71,11 +84,56 @@ void renderer_init(Window& wnd)
 	for(int i = 0; i < config::renderer_frames_in_flight; i++)
 		renderer->camera_cbv[i] = gpu_allocate_memory(sizeof(mat4), GPU_MEMORY_MAPPED, GPU_BUFFER_UNIFORM);
 
+	renderer->visbuffer_tex = gpu_create_texture
+	({
+		.dim = uvec3{renderer->render_resolution, 1u},
+		.format = GPU_FORMAT_R32_UINT,
+		.usage = GPU_TEXTURE_SAMPLED | GPU_TEXTURE_COLOR_ATTACHMENT
+	});
+	renderer->visbuffer = gpu_texture_view_descriptor(renderer->visbuffer_tex, {.format = GPU_FORMAT_R32_UINT});
+
+	renderer->depthbuffer_tex = gpu_create_texture
+	({
+		.dim = uvec3{renderer->render_resolution, 1u},
+		.format = GPU_FORMAT_D32_SFLOAT,
+		.usage = GPU_TEXTURE_SAMPLED | GPU_TEXTURE_DEPTH_STENCIL_ATTACHMENT
+	});
+	renderer->depthbuffer = gpu_texture_view_descriptor(renderer->depthbuffer_tex, {.format = GPU_FORMAT_D32_SFLOAT});
+
+	renderer->framebuffer_tex = gpu_create_texture
+	({
+		.dim = uvec3{renderer->render_resolution, 1u},
+		.format = GPU_FORMAT_RGBA8_UNORM,
+		.usage = GPU_TEXTURE_SAMPLED | GPU_TEXTURE_STORAGE
+	});
+	renderer->framebuffer_rw = gpu_rwtexture_view_descriptor(renderer->framebuffer_tex, {.format = GPU_FORMAT_RGBA8_UNORM});
+	renderer->framebuffer = gpu_texture_view_descriptor(renderer->framebuffer_tex, {.format = GPU_FORMAT_RGBA8_UNORM});
+
+	auto cmd = gpu_record_commands(GPU_QUEUE_GRAPHICS);
+	gpu_texture_layout_transition(cmd, renderer->visbuffer_tex, GPU_STAGE_NONE, GPU_STAGE_RASTER_OUTPUT, GPU_TEXTURE_LAYOUT_UNDEFINED, GPU_TEXTURE_LAYOUT_GENERAL);
+	gpu_texture_layout_transition(cmd, renderer->depthbuffer_tex, GPU_STAGE_NONE, GPU_STAGE_RASTER_OUTPUT, GPU_TEXTURE_LAYOUT_UNDEFINED, GPU_TEXTURE_LAYOUT_GENERAL);
+	gpu_texture_layout_transition(cmd, renderer->framebuffer_tex, GPU_STAGE_NONE, GPU_STAGE_COMPUTE, GPU_TEXTURE_LAYOUT_UNDEFINED, GPU_TEXTURE_LAYOUT_GENERAL);
+	gpu_submit(GPU_QUEUE_GRAPHICS, cmd);
+
+	renderer->visbuffer_build_pso = gpu_create_graphics_pipeline(*load_shader("shaders/visbuffer_build_opaque"), 	
+	{
+		.color_targets = {GPU_FORMAT_R32_UINT},
+		.depth_format = GPU_FORMAT_D32_SFLOAT
+	});
+
+	renderer->vb_visualize_cs = gpu_create_compute_pipeline(*load_shader("shaders/visbuffer_visualize"));
 }
 
 void renderer_shutdown()
 {
 	gpu_wait_idle();
+
+	gpu_destroy_pipeline(renderer->vb_visualize_cs);
+	gpu_destroy_pipeline(renderer->visbuffer_build_pso);
+
+	gpu_destroy_texture(renderer->framebuffer_tex);
+	gpu_destroy_texture(renderer->depthbuffer_tex);
+	gpu_destroy_texture(renderer->visbuffer_tex);
 
 	for(auto& cbv : renderer->camera_cbv)
 		gpu_free_memory(cbv);
@@ -127,6 +185,7 @@ void renderer_process_frame(double dt)
 	renderer_copy_resources_async();
 	
 	assert(renderer->cur_swapchain);
+	assert(renderer->cur_swapchain->texture);
 
 	auto cmd = gpu_record_commands(GPU_QUEUE_GRAPHICS);
 	gpu_wait_signal(cmd, GPU_STAGE_RASTER_OUTPUT, renderer->swapchain_acquire[renderer->frame_index], 0);
@@ -134,6 +193,71 @@ void renderer_process_frame(double dt)
 
 	renderer->render_world.upload_objects(cmd);
 	renderer->render_world.determine_visibility(cmd);
+
+	gpu_begin_renderpass(cmd,
+	{
+		.color_targets =
+		{
+			{
+			.texture = renderer->visbuffer_tex, 
+			.load_op = GPU_LOAD_OP_CLEAR
+			}
+		},
+		.depth_target = 
+		{
+			.texture  = renderer->depthbuffer_tex,
+			.load_op = GPU_LOAD_OP_CLEAR
+		}
+	});
+
+	gpu_set_pipeline(cmd, renderer->visbuffer_build_pso);
+	
+	gpu_set_cull_mode(cmd, GPU_CULLMODE_CW);
+
+	GPUDepthStencilDesc reverse_z
+	{
+		.depth_mode = GPU_DEPTH_READ | GPU_DEPTH_WRITE,
+		.depth_test = GPU_OP_GREATER
+	};
+	gpu_set_depth_stencil_state(cmd, reverse_z);
+
+	memcpy(gpu_map_memory(renderer->camera_cbv[renderer->frame_index]), &renderer->camera_matrix, sizeof(mat4));
+	gpu_write_cbuffer_descriptor(cmd, renderer->camera_cbv[renderer->frame_index]);
+
+	auto draw_data = renderer_world_get_bucket(renderer->camera_view, RENDER_BUCKET_DEFAULT);
+	
+	struct VBBuildData
+	{
+		GPUDevicePointer vertices;
+		GPUDevicePointer objects;
+		GPUDevicePointer instances;
+	} shader_data;
+	shader_data.vertices = renderer_geometry_vertex_pos_device_pointer();
+	shader_data.objects = renderer->render_world.get_objects();
+	shader_data.instances = gpu_host_to_device_pointer(draw_data.instances);
+
+	gpu_bind_index_buffer(cmd, renderer_geometry_index_pointer(), GPU_INDEX_TYPE_U8);
+	gpu_draw_indexed_indirect_count(cmd, &shader_data, draw_data.commands, draw_data.counter, draw_data.max_instance_count);
+	gpu_end_renderpass(cmd);
+
+	gpu_barrier(cmd, GPU_STAGE_RASTER_OUTPUT, GPU_STAGE_COMPUTE);
+
+	gpu_set_pipeline(cmd, renderer->vb_visualize_cs);
+
+	struct VBVisualizeData
+	{
+		GPUDevicePointer instances;
+		uvec2 res;
+		uint32_t visbuffer;
+		uint32_t output;	
+	} vbv_data;
+	vbv_data.instances = shader_data.instances;
+	vbv_data.res = renderer->render_resolution;
+	vbv_data.visbuffer = renderer->visbuffer.handle;
+	vbv_data.output = renderer->framebuffer_rw.handle;
+	gpu_dispatch(cmd, &vbv_data, {(vbv_data.res.x + 7u) / 8u, (vbv_data.res.y + 7u) / 8u, 1u});
+
+	gpu_barrier(cmd, GPU_STAGE_COMPUTE, GPU_STAGE_FRAGMENT_SHADER);
 
 	gpu_begin_renderpass(cmd,
 	{
@@ -176,6 +300,16 @@ RenderObject renderer_world_insert_object(const RenderObjectDescription& data)
 RenderBucketData renderer_world_get_bucket(RenderView view, RenderBucket bucket)
 {
 	return renderer->render_world.get_bucket(view, bucket);
+}
+
+GPUTextureDescriptor* renderer_get_framebuffer()
+{
+	return &renderer->framebuffer;
+}
+
+uvec2 renderer_get_render_resolution()
+{
+	return renderer->render_resolution;
 }
 
 void renderer_update_camera_matrices(const mat4& view, const mat4& proj)

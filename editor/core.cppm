@@ -13,6 +13,7 @@ import :camera_component;
 import :inspector;
 import :scenegraph;
 import :widget;
+import :viewport;
 export import :world_state;
 
 using std::uint32_t;
@@ -27,6 +28,7 @@ public:
 	{
 		imgui_add_hook([this](){draw_ui();});
 
+		widgets.push_back(std::make_unique<Viewport>(&wnd, renderer_get_framebuffer(), world));
 		widgets.push_back(std::make_unique<ScenegraphView>(world));
 		widgets.push_back(std::make_unique<Inspector>(world));
 

@@ -51,6 +51,8 @@ export uint32_t renderer_gfx_frame_index();
 export uint64_t renderer_resource_transfer_syncval();
 export RenderObject renderer_world_insert_object(const RenderObjectDescription& data);
 export RenderBucketData renderer_world_get_bucket(RenderView view, RenderBucket bucket);
+export GPUTextureDescriptor* renderer_get_framebuffer();
+export uvec2 renderer_get_render_resolution();
 export void renderer_update_camera_matrices(const mat4& view, const mat4& proj);
 
 }
