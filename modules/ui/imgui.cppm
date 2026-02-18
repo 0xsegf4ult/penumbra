@@ -158,8 +158,8 @@ export bool imgui_backend_init(Window* window)
 	rd->font_texture_view = gpu_texture_view_descriptor(rd->font_texture, {.format = GPU_FORMAT_RGBA8_UNORM});
 
 	auto cmd = gpu_record_commands(GPU_QUEUE_GRAPHICS);
-	gpu_texture_layout_transition(cmd, rd->font_texture_view, GPU_STAGE_NONE, GPU_STAGE_TRANSFER, GPU_TEXTURE_LAYOUT_UNDEFINED, GPU_TEXTURE_LAYOUT_GENERAL);
-	gpu_copy_to_texture(cmd, font_data, rd->font_texture_view);
+	gpu_texture_layout_transition(cmd, rd->font_texture, GPU_STAGE_NONE, GPU_STAGE_TRANSFER, GPU_TEXTURE_LAYOUT_UNDEFINED, GPU_TEXTURE_LAYOUT_GENERAL);
+	gpu_copy_to_texture(cmd, font_data, rd->font_texture);
 	gpu_barrier(cmd, GPU_STAGE_TRANSFER, GPU_STAGE_FRAGMENT_SHADER);
 	auto sig = gpu_submit(GPU_QUEUE_GRAPHICS, cmd);
 	gpu_wait_queue(GPU_QUEUE_GRAPHICS, sig);

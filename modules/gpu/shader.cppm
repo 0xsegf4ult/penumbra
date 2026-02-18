@@ -42,7 +42,7 @@ export struct ShaderFileFormat
 	};
 };
 
-export struct Shader
+export struct ShaderIR
 {
 	constexpr static size_t max_shader_stages = 2;
 	struct ShaderStage
@@ -65,11 +65,11 @@ export struct Shader
 	} pconst;
 };
 
-export std::expected<Shader, std::string_view> load_shader(const vfs::path& path)
+export std::expected<ShaderIR, std::string_view> load_shader(const vfs::path& path)
 {
 	log::info("gpu_shader: loading shader {}", path.string());
 
-	Shader res;
+	ShaderIR res;
 	
 	auto shader_file = vfs::open(path, vfs::access_readonly);
 	if(!shader_file.has_value())

@@ -5,7 +5,7 @@ import penumbra.core;
 import penumbra.math;
 import std;
 
-using std::uint8_t, std::uint16_t, std::uint32_t, std::uint64_t, std::size_t;
+using std::uint8_t, std::uint16_t, std::int32_t, std::uint32_t, std::uint64_t, std::size_t;
 
 export namespace penumbra
 {
@@ -65,11 +65,12 @@ enum GPUStage : uint32_t
 {
 	GPU_STAGE_NONE = 0,
 	GPU_STAGE_TRANSFER = 0x1,
-	GPU_STAGE_COMPUTE = 0x2,
-	GPU_STAGE_RASTER_OUTPUT = 0x4,
-	GPU_STAGE_FRAGMENT_SHADER = 0x8,
-	GPU_STAGE_VERTEX_SHADER = 0x10,
-	GPU_STAGE_ALL = 0x20
+	GPU_STAGE_COMMAND_PROCESSOR = 0x2,	
+	GPU_STAGE_COMPUTE = 0x4,
+	GPU_STAGE_RASTER_OUTPUT = 0x8,
+	GPU_STAGE_FRAGMENT_SHADER = 0x10,
+	GPU_STAGE_VERTEX_SHADER = 0x20,
+	GPU_STAGE_ALL = 0x40
 };
 
 enum GPUHazard : uint32_t
@@ -83,9 +84,8 @@ constexpr uint8_t GPU_ALL_MIPS = ~0u;
 constexpr uint16_t GPU_ALL_LAYERS = ~0u; 
 
 using GPUDevicePointer = uint64_t;
+using GPUTexture = strongly_typed<uint32_t, struct _gpu_texture_tag>;
 using GPUSampler = strongly_typed<uint32_t, struct _gpu_sampler_tag>;
-
-struct Shader;
 
 struct GPUPointer
 {
@@ -115,13 +115,6 @@ struct GPUTextureDesc
 	GPUTextureUsage usage{GPU_TEXTURE_INVALID};
 };
 
-struct GPUTexture
-{
-	uint64_t handle;
-	uint64_t allocation;
-	uvec3 size{0u};
-};
-
 struct GPUViewDesc
 {
 	GPUTextureType type{GPU_TEXTURE_2D};
@@ -136,7 +129,6 @@ struct GPUTextureDescriptor
 {
 	uint32_t handle;
 	uint32_t flags;
-	const GPUTexture* texture;
 	GPUViewDesc desc;
 };
 
@@ -215,7 +207,8 @@ struct GPUSemaphore
 
 struct GPURenderTarget
 {
-	GPUTextureDescriptor* resource{nullptr};
+	GPUTexture texture{0u};
+	GPUViewDesc view{};
 	GPULoadOP load_op{GPU_LOAD_OP_DONTCARE};
 	GPUStoreOP store_op{GPU_STORE_OP_STORE};
 	float clear{0.0f};
@@ -223,9 +216,18 @@ struct GPURenderTarget
 
 struct GPURenderPassDesc
 {
-	uvec4 render_area;
+	uvec4 render_area{0u};
 	array_proxy<GPURenderTarget> color_targets;
-	GPURenderTarget depth_target;
+	GPURenderTarget depth_target{};
+};
+
+struct GPUIndirectCommand
+{
+	uint32_t index_count;
+	uint32_t instance_count;
+	uint32_t index_offset;
+	int32_t vertex_offset;
+	uint32_t instance_id;
 };
 
 bool gpu_init();
@@ -237,13 +239,13 @@ GPUDevicePointer gpu_host_to_device_pointer(const GPUPointer& ptr);
 std::byte* gpu_map_memory(const GPUPointer& ptr);
 
 GPUTexture gpu_create_texture(const GPUTextureDesc& desc);
-void gpu_destroy_texture(GPUTexture& tex);
-GPUTextureDescriptor gpu_texture_view_descriptor(const GPUTexture& tex, const GPUViewDesc& desc);
-GPUTextureDescriptor gpu_rwtexture_view_descriptor(const GPUTexture& tex, const GPUViewDesc& desc);
+void gpu_destroy_texture(GPUTexture tex);
+GPUTextureDescriptor gpu_texture_view_descriptor(GPUTexture tex, const GPUViewDesc& desc);
+GPUTextureDescriptor gpu_rwtexture_view_descriptor(GPUTexture tex, const GPUViewDesc& desc);
 GPUSampler gpu_create_sampler(const GPUSamplerDesc& desc);
 
-GPUPipeline gpu_create_compute_pipeline(const Shader& shader);
-GPUPipeline gpu_create_graphics_pipeline(const Shader& shader, const GPURasterDesc& raster);
+GPUPipeline gpu_create_compute_pipeline(const ShaderIR& shader);
+GPUPipeline gpu_create_graphics_pipeline(const ShaderIR& shader, const GPURasterDesc& raster);
 void gpu_destroy_pipeline(GPUPipeline& pipe);
 
 GPUCommandBuffer gpu_record_commands(GPUQueue queue);
@@ -256,15 +258,17 @@ void gpu_destroy_semaphore(GPUSemaphore& sem);
 GPUSemaphore gpu_get_queue_timeline(GPUQueue queue);
 
 void gpu_mem_copy(const GPUCommandBuffer& cmd, const GPUPointer& src, const GPUPointer& dst, size_t size);
-void gpu_copy_to_texture(const GPUCommandBuffer& cmd, const GPUPointer& src, const GPUTextureDescriptor& dst);
-void gpu_copy_from_texture(const GPUCommandBuffer& cmd, const GPUTextureDescriptor& src, const GPUPointer& dst);
+void gpu_mem_clear(const GPUCommandBuffer& cmd, const GPUPointer& dst, size_t size);
+void gpu_copy_to_texture(const GPUCommandBuffer& cmd, const GPUPointer& src, GPUTexture dst);
+void gpu_copy_from_texture(const GPUCommandBuffer& cmd, GPUTexture src, const GPUPointer& dst);
 
 void gpu_barrier(const GPUCommandBuffer& cmd, GPUStage src, GPUStage dst, GPUHazard hazards = GPU_HAZARD_NONE);
-void gpu_texture_layout_transition(const GPUCommandBuffer& cmd, const GPUTextureDescriptor& tex, GPUStage src_stage, GPUStage dst_stage, GPUTextureLayout src_layout, GPUTextureLayout dst_layout, GPUQueue src_queue = GPU_QUEUE_INVALID, GPUQueue dst_queue = GPU_QUEUE_INVALID);
+void gpu_texture_layout_transition(const GPUCommandBuffer& cmd, GPUTexture tex, GPUStage src_stage, GPUStage dst_stage, GPUTextureLayout src_layout, GPUTextureLayout dst_layout, GPUQueue src_queue = GPU_QUEUE_INVALID, GPUQueue dst_queue = GPU_QUEUE_INVALID);
 void gpu_wait_signal(GPUCommandBuffer& cmd, GPUStage dst_stage, GPUSemaphore& sem, uint64_t timeline);
 void gpu_emit_signal(GPUCommandBuffer& cmd, GPUStage src_stage, GPUSemaphore& sem, uint64_t timeline);
 
 void gpu_set_pipeline(GPUCommandBuffer& cmd, GPUPipeline& pipe);
+void gpu_set_depth_stencil_state(const GPUCommandBuffer& cmd, const GPUDepthStencilDesc& state); 
 void gpu_write_cbuffer_descriptor(const GPUCommandBuffer& cmd, const GPUPointer& cbuffer);
 
 void gpu_dispatch(const GPUCommandBuffer& cmd, void* data, uvec3 dim);
@@ -279,9 +283,10 @@ void gpu_bind_index_buffer(const GPUCommandBuffer& cmd, const GPUPointer& buffer
 
 void gpu_draw(const GPUCommandBuffer& cmd, void* data, uint32_t vertex_count, uint32_t instance_count, uint32_t base_vertex, uint32_t base_instance);
 void gpu_draw_indexed(const GPUCommandBuffer& cmd, void* data, uint32_t index_count, uint32_t instance_count, uint32_t base_index, uint32_t base_vertex, uint32_t base_instance);
+void gpu_draw_indexed_indirect_count(const GPUCommandBuffer& cmd, void* data, const GPUPointer& commands, const GPUPointer& draw_count, uint32_t max_draw_count);
 
 void gpu_swapchain_init(Window& wnd);
-GPUTextureDescriptor* gpu_swapchain_acquire_next(GPUSemaphore& sem);
+GPUTexture gpu_swapchain_acquire_next(GPUSemaphore& sem);
 void gpu_swapchain_present(GPUQueue queue, GPUSemaphore& sem);
 bool gpu_swapchain_set_present_mode(GPUPresentMode mode);
 

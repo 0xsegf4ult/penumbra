@@ -4,4 +4,8 @@ target_link_libraries(penumbra_renderer PRIVATE penumbra_core penumbra_math penu
 
 target_sources(penumbra_renderer PUBLIC FILE_SET CXX_MODULES
 	FILES
-	core.cppm)
+	api.cppm
+	geometry_buffer.cppm
+	mod.cppm
+	PRIVATE
+	impl.cpp)

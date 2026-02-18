@@ -224,6 +224,8 @@ constexpr VkPipelineStageFlags2 gpu_stage_to_vk(GPUStage stage)
 
 	if(stage & GPU_STAGE_TRANSFER)
 		res |= VK_PIPELINE_STAGE_2_TRANSFER_BIT;
+	if(stage & GPU_STAGE_COMMAND_PROCESSOR)
+		res |= VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT;
 	if(stage & GPU_STAGE_COMPUTE)
 		res |= VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
 	if(stage & GPU_STAGE_RASTER_OUTPUT)
@@ -375,6 +377,32 @@ constexpr VkImageLayout texlayout_to_vk(GPUTextureLayout layout)
 	}
 }
 
+constexpr VkCompareOp depth_test_to_vk(GPUOp op)
+{
+	switch(op)
+	{
+	case GPU_OP_NEVER:
+		return VK_COMPARE_OP_NEVER;
+	case GPU_OP_LESS:
+		return VK_COMPARE_OP_LESS;
+	case GPU_OP_EQUAL:
+		return VK_COMPARE_OP_EQUAL;
+	case GPU_OP_LESS_EQUAL:
+		return VK_COMPARE_OP_LESS_OR_EQUAL;
+	case GPU_OP_GREATER:
+		return VK_COMPARE_OP_GREATER;
+	case GPU_OP_NOT_EQUAL:
+		return VK_COMPARE_OP_NOT_EQUAL;
+	case GPU_OP_GREATER_EQUAL:
+		return VK_COMPARE_OP_GREATER_OR_EQUAL;
+	case GPU_OP_ALWAYS:
+		return VK_COMPARE_OP_ALWAYS;
+	default:
+		std::unreachable();
+	}
+}
+
+
 constexpr VkAttachmentLoadOp load_op_to_vk(GPULoadOP op)
 {
 	switch(op)
@@ -499,10 +527,24 @@ enum ResourceHeapIndex
 	BINDLESS_RWTEXTURES
 };
 
-template <typename T>
 struct BindlessResourceHeap
 {
-	std::vector<T> resources;
+	uint32_t top{0};
+	std::vector<uint32_t> freelist;
+
+	uint32_t allocate()
+	{
+		if(!freelist.empty())
+		{
+			auto handle = freelist.back();
+			freelist.pop_back();
+			return handle;
+		}
+
+		auto handle = top;
+		top++;
+		return handle;
+	}
 };
 
 struct GPUBuffer
@@ -513,6 +555,20 @@ struct GPUBuffer
 	size_t size;
 };
 
+struct ImageViewInfo
+{
+	VkImageView handle;
+	GPUViewDesc desc;
+};
+
+struct GPUTextureData
+{
+	VkImage handle;
+	VkDeviceMemory allocation;
+	uvec3 size;
+	GPUFormat format;
+	std::vector<ImageViewInfo> views;
+};
 
 struct gpu_context_t
 {
@@ -523,27 +579,26 @@ struct gpu_context_t
 	std::array<QueueData, 3> queue_data;
 
 	std::vector<GPUBuffer> buffers;
+	std::vector<GPUTextureData> textures;
+	std::vector<VkSampler> samplers;
 
 	VkDescriptorSetLayout empty_descriptor_layout;	
 	VkDescriptorSetLayout bindless_descriptor_layout;
 	VkDescriptorPool bindless_descriptor_pool;
 	VkDescriptorSet bindless_descriptor_set;
 
-	BindlessResourceHeap<VkImageView> bindless_texture_heap;
-	BindlessResourceHeap<VkImageView> bindless_rwtexture_heap;
-	BindlessResourceHeap<VkSampler> bindless_sampler_heap;
+	BindlessResourceHeap bindless_texture_heap;
+	BindlessResourceHeap bindless_rwtexture_heap;
+	BindlessResourceHeap bindless_sampler_heap;
 
-	GPUTexture default_texture;
 	GPUTextureDescriptor default_texture_view;
 	GPUTextureDescriptor default_rwtexture_view;
-	GPUSampler default_sampler;
 
 	VkSurfaceKHR swapchain_surface;
 	VkSwapchainKHR swapchain;
 	VkPresentModeKHR swapchain_pmode;
 
 	std::vector<GPUTexture> swapchain_textures;
-	std::vector<GPUTextureDescriptor> swapchain_texviews;
 	uint32_t current_swapchain_index;
 	bool swapchain_dirty;
 };
@@ -799,6 +854,7 @@ bool vulkan_create_device(std::span<VkPhysicalDevice> phys_devices, int index = 
 		.pNext = &chain_vk11,
 		.features =
 		{
+			.geometryShader = true,
 			.logicOp = true,
 			.multiDrawIndirect = true,
 			.drawIndirectFirstInstance = true,
@@ -1031,21 +1087,22 @@ bool gpu_init()
 
 	vulkan_setup_descriptor_heaps();
 	
-	gpu_context->default_texture = gpu_create_texture
+	gpu_create_texture
 	({
 	 	.dim = {1u, 1u, 1u}, 
 		.format = GPU_FORMAT_RGBA8_UNORM,
 		.usage = GPU_TEXTURE_SAMPLED | GPU_TEXTURE_STORAGE
 	});
 
-	gpu_context->default_texture_view = gpu_texture_view_descriptor(gpu_context->default_texture, {.format = GPU_FORMAT_RGBA8_UNORM});
+	gpu_context->default_texture_view = gpu_texture_view_descriptor(GPUTexture{0u}, {.format = GPU_FORMAT_RGBA8_UNORM});
+	gpu_context->default_rwtexture_view = gpu_rwtexture_view_descriptor(GPUTexture{0u}, {.format = GPU_FORMAT_RGBA8_UNORM});
 
 	auto cmd = gpu_record_commands(GPU_QUEUE_GRAPHICS);
-	gpu_texture_layout_transition(cmd, gpu_context->default_texture_view, GPU_STAGE_NONE, GPU_STAGE_ALL, GPU_TEXTURE_LAYOUT_UNDEFINED, GPU_TEXTURE_LAYOUT_GENERAL);
+	gpu_texture_layout_transition(cmd, GPUTexture{0u}, GPU_STAGE_NONE, GPU_STAGE_ALL, GPU_TEXTURE_LAYOUT_UNDEFINED, GPU_TEXTURE_LAYOUT_GENERAL);
 	auto sync = gpu_submit(GPU_QUEUE_GRAPHICS, cmd);
 	gpu_wait_queue(GPU_QUEUE_GRAPHICS, sync);
 
-	gpu_context->default_sampler = gpu_create_sampler
+	gpu_create_sampler
 	({
 		.mag_filter = GPU_FILTER_LINEAR,
 		.min_filter = GPU_FILTER_LINEAR,
@@ -1061,22 +1118,23 @@ bool gpu_init()
 void gpu_cleanup_swapchain();
 void gpu_shutdown()
 {
-	for(auto res : gpu_context->bindless_texture_heap.resources)
-		vkDestroyImageView(gpu_context->device, res, nullptr);
-	
-	for(auto res : gpu_context->bindless_rwtexture_heap.resources)
-		vkDestroyImageView(gpu_context->device, res, nullptr);
-
-	for(auto res : gpu_context->bindless_sampler_heap.resources)
-		vkDestroySampler(gpu_context->device, res, nullptr);
-
 	if(gpu_context->swapchain != VK_NULL_HANDLE)
 	{
 		gpu_cleanup_swapchain();
 		vkDestroySurfaceKHR(gpu_context->instance, gpu_context->swapchain_surface, nullptr);
 	}
+	
+	for(auto res : gpu_context->samplers)
+		vkDestroySampler(gpu_context->device, res, nullptr);
 
-	gpu_destroy_texture(gpu_context->default_texture);
+	{
+		auto& null_tex = gpu_context->textures[0];
+		for(auto& view : null_tex.views)
+			vkDestroyImageView(gpu_context->device, view.handle, nullptr);
+
+		vkDestroyImage(gpu_context->device, null_tex.handle, nullptr);
+		vkFreeMemory(gpu_context->device, null_tex.allocation, nullptr);
+	}
 
 	vkDestroyDescriptorPool(gpu_context->device, gpu_context->bindless_descriptor_pool, nullptr);
 	vkDestroyDescriptorSetLayout(gpu_context->device, gpu_context->bindless_descriptor_layout, nullptr);
@@ -1296,14 +1354,14 @@ GPUTexture gpu_create_texture(const GPUTextureDesc& desc)
 	if(status != VK_SUCCESS)
 	{
 		log::error("gpu_vulkan: failed to create texture: {}", string_VkResult(status));
-		return {0, 0, uvec3{0u}};
+		return GPUTexture{0u};
 	}
 
 	status = vkCreateImage(gpu_context->device, &image_ci, nullptr, &handle);
 	if(status != VK_SUCCESS)
 	{
 		log::error("gpu_vulkan: failed to create texture: {}", string_VkResult(status));
-		return {0, 0, uvec3{0u}};
+		return GPUTexture{0u};
 	}
 
 	VkMemoryRequirements mem_req{};
@@ -1312,7 +1370,7 @@ GPUTexture gpu_create_texture(const GPUTextureDesc& desc)
 	if(!mem_type.has_value())
 	{
 		log::error("gpu_vulkan: failed to allocate texture memory: invalid memory heap");
-		return {0, 0, uvec3{0u}};
+		return GPUTexture{0u};
 	}
 
 	VkDeviceMemory memory;
@@ -1328,38 +1386,49 @@ GPUTexture gpu_create_texture(const GPUTextureDesc& desc)
 	if(status != VK_SUCCESS)
 	{
 		log::error("gpu_vulkan: failed to allocate texture memory: {}", string_VkResult(status));
-		return {0, 0, uvec3{0u}};
+		return GPUTexture{0u};
 	}
 	
 	status = vkBindImageMemory(gpu_context->device, handle, memory, 0);
 	if(status != VK_SUCCESS)
 	{
 		log::error("gpu_vulkan: failed to allocate texture memory: {}", string_VkResult(status));
-		return {0, 0, uvec3{0u}};
+		return GPUTexture{0u};
 	}
 
-	return
+	gpu_context->textures.push_back(GPUTextureData{handle, memory, desc.dim, desc.format});
+	return GPUTexture{static_cast<uint32_t>(gpu_context->textures.size() - 1)};
+}
+
+void gpu_destroy_texture(GPUTexture tex)
+{
+	assert(tex && "cannot destroy default texture");
+	auto& tex_info = gpu_context->textures[tex];
+
+	for(auto& view : tex_info.views)
+		vkDestroyImageView(gpu_context->device, view.handle, nullptr);
+
+	vkDestroyImage(gpu_context->device, tex_info.handle, nullptr);
+	vkFreeMemory(gpu_context->device, tex_info.allocation, nullptr);
+}
+
+VkImageView get_or_create_image_view(GPUTextureData& tex, const GPUViewDesc& desc)
+{
+	auto view_desc_equal = [](const GPUViewDesc& lhs, const GPUViewDesc& rhs) -> bool
 	{
-		std::bit_cast<uint64_t>(handle),
-		std::bit_cast<uint64_t>(memory),
-		desc.dim
-	};	
-}
+		return (std::memcmp(&lhs, &rhs, sizeof(GPUViewDesc)) == 0);
+	};
 
-void gpu_destroy_texture(GPUTexture& tex)
-{
-	vkDestroyImage(gpu_context->device, std::bit_cast<VkImage>(tex.handle), nullptr);
-	vkFreeMemory(gpu_context->device, std::bit_cast<VkDeviceMemory>(tex.allocation), nullptr);
-}
+	for(auto& view : tex.views)
+		if(view_desc_equal(view.desc, desc))
+			return view.handle;
 
-VkImageView create_image_view(const GPUTexture& tex, const GPUViewDesc& desc)
-{
 	const VkImageViewCreateInfo view_ci
 	{
 		.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
 		.pNext = nullptr,
 		.flags = 0,
-		.image = std::bit_cast<VkImage>(tex.handle),
+		.image = tex.handle,
 		.viewType = image_view_type_to_vk(desc.type),
 		.format = format_to_vk(desc.format),
 		.components = 
@@ -1387,14 +1456,16 @@ VkImageView create_image_view(const GPUTexture& tex, const GPUViewDesc& desc)
 		return VK_NULL_HANDLE;
 	}
 
+	tex.views.push_back({view, desc});
+
 	return view;
 }
 
-GPUTextureDescriptor gpu_texture_view_descriptor(const GPUTexture& tex, const GPUViewDesc& desc)
+GPUTextureDescriptor gpu_texture_view_descriptor(GPUTexture tex, const GPUViewDesc& desc)
 {
-	auto view = create_image_view(tex, desc);
+	auto view = get_or_create_image_view(gpu_context->textures[tex], desc);
 	if(view == VK_NULL_HANDLE)
-		return {0, 0, nullptr, desc};
+		return {0, 0, desc};
 
 	const VkDescriptorImageInfo img_info
 	{
@@ -1409,7 +1480,7 @@ GPUTextureDescriptor gpu_texture_view_descriptor(const GPUTexture& tex, const GP
 		.pNext = nullptr,
 		.dstSet = gpu_context->bindless_descriptor_set,
 		.dstBinding = 1,
-		.dstArrayElement = static_cast<uint32_t>(gpu_context->bindless_texture_heap.resources.size()),
+		.dstArrayElement = gpu_context->bindless_texture_heap.allocate(),
 		.descriptorCount = 1,
 		.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
 		.pImageInfo = &img_info,
@@ -1418,16 +1489,14 @@ GPUTextureDescriptor gpu_texture_view_descriptor(const GPUTexture& tex, const GP
 	};
 
 	vkUpdateDescriptorSets(gpu_context->device, 1u, &ds_write, 0u, nullptr);	
-
-	gpu_context->bindless_texture_heap.resources.push_back(view);	
-	return GPUTextureDescriptor{static_cast<uint32_t>(gpu_context->bindless_texture_heap.resources.size()) - 1, 0, &tex, desc};
+	return GPUTextureDescriptor{ds_write.dstArrayElement, 0, desc};
 }
 
-GPUTextureDescriptor gpu_rwtexture_view_descriptor(const GPUTexture& tex, const GPUViewDesc& desc)
+GPUTextureDescriptor gpu_rwtexture_view_descriptor(GPUTexture tex, const GPUViewDesc& desc)
 {
-	auto view = create_image_view(tex, desc);
+	auto view = get_or_create_image_view(gpu_context->textures[tex], desc);
 	if(view == VK_NULL_HANDLE)
-		return {0, 0, nullptr, desc};
+		return {0, 0, desc};
 
 	const VkDescriptorImageInfo img_info
 	{
@@ -1442,7 +1511,7 @@ GPUTextureDescriptor gpu_rwtexture_view_descriptor(const GPUTexture& tex, const 
 		.pNext = nullptr,
 		.dstSet = gpu_context->bindless_descriptor_set,
 		.dstBinding = 2,
-		.dstArrayElement = static_cast<uint32_t>(gpu_context->bindless_rwtexture_heap.resources.size()),
+		.dstArrayElement = gpu_context->bindless_rwtexture_heap.allocate(),
 		.descriptorCount = 1,
 		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
 		.pImageInfo = &img_info,
@@ -1451,14 +1520,7 @@ GPUTextureDescriptor gpu_rwtexture_view_descriptor(const GPUTexture& tex, const 
 	};
 
 	vkUpdateDescriptorSets(gpu_context->device, 1u, &ds_write, 0u, nullptr);
-
-	gpu_context->bindless_rwtexture_heap.resources.push_back(view);
-	return GPUTextureDescriptor{static_cast<uint32_t>(gpu_context->bindless_rwtexture_heap.resources.size() - 1), GPU_TEXTURE_DESCRIPTOR_RW, &tex, desc};
-}
-
-void gpu_destroy_texture_view(GPUTextureDescriptor& view)
-{
-
+	return GPUTextureDescriptor{ds_write.dstArrayElement, GPU_TEXTURE_DESCRIPTOR_RW, desc};
 }
 
 GPUSampler gpu_create_sampler(const GPUSamplerDesc& desc)
@@ -1501,7 +1563,7 @@ GPUSampler gpu_create_sampler(const GPUSamplerDesc& desc)
 		.pNext = nullptr,	
 		.dstSet = gpu_context->bindless_descriptor_set,
 		.dstBinding = 0,
-		.dstArrayElement = static_cast<uint32_t>(gpu_context->bindless_sampler_heap.resources.size()),
+		.dstArrayElement = gpu_context->bindless_sampler_heap.allocate(),
 		.descriptorCount = 1,
 		.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER,
 		.pImageInfo = &info,
@@ -1510,8 +1572,8 @@ GPUSampler gpu_create_sampler(const GPUSamplerDesc& desc)
 	};	
 	vkUpdateDescriptorSets(gpu_context->device, 1u, &ds_write, 0u, nullptr);	
 	
-	gpu_context->bindless_sampler_heap.resources.push_back(sampler);
-	return GPUSampler{static_cast<uint32_t>(gpu_context->bindless_sampler_heap.resources.size()) - 1};
+	gpu_context->samplers.push_back(sampler);
+	return GPUSampler{ds_write.dstArrayElement};
 }
 
 GPUCommandBuffer gpu_record_commands(GPUQueue queue)
@@ -1721,7 +1783,7 @@ GPUSemaphore gpu_get_queue_timeline(GPUQueue queue)
 	};
 }
 
-VkDescriptorSetLayout shader_create_push_descriptor_set(const Shader::CBufferInfo& info)
+VkDescriptorSetLayout shader_create_push_descriptor_set(const ShaderIR::CBufferInfo& info)
 {
 	const VkDescriptorSetLayoutBinding binding
 	{
@@ -1746,7 +1808,7 @@ VkDescriptorSetLayout shader_create_push_descriptor_set(const Shader::CBufferInf
 	return dsl;
 }
 
-std::pair<VkPipelineLayout, uint64_t> shader_create_pipeline_layout(const Shader& shader)
+std::pair<VkPipelineLayout, uint64_t> shader_create_pipeline_layout(const ShaderIR& shader)
 {	
 	std::array<VkDescriptorSetLayout, 2> ds_layouts;
 
@@ -1786,7 +1848,7 @@ std::pair<VkPipelineLayout, uint64_t> shader_create_pipeline_layout(const Shader
 	return {layout, pdsl_handle};
 }
 
-GPUPipeline gpu_create_compute_pipeline(const Shader& shader)
+GPUPipeline gpu_create_compute_pipeline(const ShaderIR& shader)
 {
 	auto [layout, pdsl_handle] = shader_create_pipeline_layout(shader);
 
@@ -1834,7 +1896,7 @@ GPUPipeline gpu_create_compute_pipeline(const Shader& shader)
 	};
 }
 
-GPUPipeline gpu_create_graphics_pipeline(const Shader& shader, const GPURasterDesc& raster)
+GPUPipeline gpu_create_graphics_pipeline(const ShaderIR& shader, const GPURasterDesc& raster)
 {
 	auto [layout, pdsl_handle] = shader_create_pipeline_layout(shader);
 	std::array<VkShaderModuleCreateInfo, max_shader_stages> sm_info;
@@ -2057,33 +2119,48 @@ void gpu_mem_copy(const GPUCommandBuffer& cmd, const GPUPointer& src, const GPUP
 	vkCmdCopyBuffer(std::bit_cast<VkCommandBuffer>(cmd.handle), src_buffer.handle, dst_buffer.handle, 1, &region);
 }
 
-void gpu_copy_to_texture(const GPUCommandBuffer& cmd, const GPUPointer& src, const GPUTextureDescriptor& dst)
+void gpu_mem_clear(const GPUCommandBuffer& cmd, const GPUPointer& dst, size_t size)
+{
+	assert(dst.handle);
+	auto& dst_buffer = gpu_context->buffers[dst.handle - 1];
+	assert(dst.offset + size <= dst_buffer.size);
+	
+	vkCmdFillBuffer(std::bit_cast<VkCommandBuffer>(cmd.handle), dst_buffer.handle, dst.offset, size, 0);
+}
+
+void gpu_copy_to_texture(const GPUCommandBuffer& cmd, const GPUPointer& src, GPUTexture dst)
 {
 	assert(src.handle);
 	auto& buffer = gpu_context->buffers[src.handle - 1];
 	assert(src.offset < buffer.size);
-	assert(dst.texture);
+	auto& texture = gpu_context->textures[dst];
 
 	VkBufferImageCopy region
 	{
 		.bufferOffset = src.offset,
-		.imageSubresource = {format_to_vk_aspect(dst.desc.format), dst.desc.base_mip, dst.desc.base_layer, dst.desc.layer_count == GPU_ALL_LAYERS ? VK_REMAINING_ARRAY_LAYERS : dst.desc.layer_count},
+		.imageSubresource =
+		{
+			.aspectMask = format_to_vk_aspect(texture.format),
+			.mipLevel = 0,
+			.baseArrayLayer = 0,
+			.layerCount = VK_REMAINING_ARRAY_LAYERS
+		},
 		.imageOffset = {0, 0, 0},
-		.imageExtent = {dst.texture->size.x, dst.texture->size.y, dst.texture->size.z}
+		.imageExtent = {texture.size.x, texture.size.y, texture.size.z}
 	};
 
 	vkCmdCopyBufferToImage
 	(
 		std::bit_cast<VkCommandBuffer>(cmd.handle),
 		buffer.handle,
-		std::bit_cast<VkImage>(dst.texture->handle),
+		texture.handle,
 		VK_IMAGE_LAYOUT_GENERAL,
 		1u,
 		&region
 	);
 }
 
-void gpu_copy_from_texture(const GPUCommandBuffer& cmd, const GPUTextureDescriptor& src, const GPUPointer& dst)
+void gpu_copy_from_texture(const GPUCommandBuffer& cmd, GPUTexture src, const GPUPointer& dst)
 {
 
 }
@@ -2133,19 +2210,21 @@ void gpu_barrier(const GPUCommandBuffer& cmd, GPUStage src, GPUStage dst, GPUHaz
 	vkCmdPipelineBarrier2(std::bit_cast<VkCommandBuffer>(cmd.handle), &dep);
 }
 
-void gpu_texture_layout_transition(const GPUCommandBuffer& cmd, const GPUTextureDescriptor& tex, GPUStage src_stage, GPUStage dst_stage, GPUTextureLayout src_layout, GPUTextureLayout dst_layout, GPUQueue src_queue, GPUQueue dst_queue)
+void gpu_texture_layout_transition(const GPUCommandBuffer& cmd, GPUTexture tex, GPUStage src_stage, GPUStage dst_stage, GPUTextureLayout src_layout, GPUTextureLayout dst_layout, GPUQueue src_queue, GPUQueue dst_queue)
 {
+	auto& texture = gpu_context->textures[tex];
+
 	VkImageMemoryBarrier2 barrier;
 	barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
 	barrier.pNext = nullptr;
-	barrier.image = std::bit_cast<VkImage>(tex.texture->handle);
+	barrier.image = texture.handle;
 	barrier.subresourceRange = 
 	{
-		format_to_vk_aspect(tex.desc.format), 
-		tex.desc.base_mip,
-	       	(tex.desc.mip_count == GPU_ALL_MIPS) ? VK_REMAINING_MIP_LEVELS : tex.desc.mip_count,
-		tex.desc.base_layer,
-		(tex.desc.layer_count == GPU_ALL_LAYERS) ? VK_REMAINING_ARRAY_LAYERS : tex.desc.layer_count
+		format_to_vk_aspect(texture.format), 
+		0,
+		VK_REMAINING_MIP_LEVELS,
+		0,
+		VK_REMAINING_ARRAY_LAYERS
 	};	
 
 	barrier.srcStageMask = gpu_stage_to_vk(src_stage);
@@ -2222,6 +2301,17 @@ void gpu_set_pipeline(GPUCommandBuffer& cmd, GPUPipeline& pipe)
 	vkCmdBindDescriptorSets(cb, bindpoint, std::bit_cast<VkPipelineLayout>(pipe.layout), 1u, 1u, &gpu_context->bindless_descriptor_set, 0u, nullptr);
 }
 
+void gpu_set_depth_stencil_state(const GPUCommandBuffer& cmd, const GPUDepthStencilDesc& state)
+{
+	assert(cmd.bound_pipe);
+	auto cb = std::bit_cast<VkCommandBuffer>(cmd.handle);
+
+	vkCmdSetDepthCompareOp(cb, depth_test_to_vk(state.depth_test));
+        vkCmdSetDepthTestEnable(cb, state.depth_mode > 0);
+        vkCmdSetDepthWriteEnable(cb, (state.depth_mode & GPU_DEPTH_WRITE) ? true : false);
+        vkCmdSetDepthClampEnableEXT(cb, false);
+}
+
 void gpu_write_cbuffer_descriptor(const GPUCommandBuffer& cmd, const GPUPointer& cbuffer)
 {
 	assert(cmd.bound_pipe);
@@ -2281,30 +2371,37 @@ void gpu_dispatch_indirect(const GPUCommandBuffer& cmd, void* data, const GPUPoi
 	vkCmdDispatchIndirect(cb, buffer.handle, dim.offset);
 }
 
-constexpr VkImageView image_view_from_descriptor(GPUTextureDescriptor& tex)
-{
-	if(tex.flags & GPU_TEXTURE_DESCRIPTOR_RW)
-		return gpu_context->bindless_rwtexture_heap.resources[tex.handle];
-	else
-		return gpu_context->bindless_texture_heap.resources[tex.handle];
-}
-
 void gpu_begin_renderpass(const GPUCommandBuffer& cmd, const GPURenderPassDesc& rp)
 {
 	std::array<VkRenderingAttachmentInfo, max_color_attachments> attachments;
 	uint32_t att_count = 0;
 
+	uint32_t w = 0;
+	uint32_t h = 0;
+
 	for(const auto& att : rp.color_targets)
 	{
 		assert(att_count < max_color_attachments && "render pass has too many color attachments!");
-		if(!att.resource)
+		if(!att.texture)
 			continue;
 
 		auto& new_att = attachments[att_count++];
 
 		new_att.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
 		new_att.pNext = nullptr;
-		new_att.imageView = image_view_from_descriptor(*(att.resource));
+		
+		auto view = att.view;
+		auto& tex = gpu_context->textures[att.texture];
+		if(view.format == GPU_FORMAT_UNDEFINED)
+			view.format = tex.format;
+
+		if((w && w != tex.size.w) || (h && h != tex.size.h))
+			log::warn("gpu_begin_renderpass: mismatched attachment sizes {}x{} != {}x{}", w, h, tex.size.w, tex.size.h); 
+
+		w = tex.size.w;
+		h = tex.size.h;
+
+		new_att.imageView = get_or_create_image_view(tex, view);
 		new_att.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
 		new_att.resolveMode = VK_RESOLVE_MODE_NONE;
 		new_att.resolveImageView = VK_NULL_HANDLE;
@@ -2314,11 +2411,28 @@ void gpu_begin_renderpass(const GPUCommandBuffer& cmd, const GPURenderPassDesc& 
 		new_att.clearValue.color = {att.clear, att.clear, att.clear, att.clear};	
 	}
 
+	VkImageView depth_view = VK_NULL_HANDLE;
+	if(rp.depth_target.texture)
+	{
+		auto view = rp.depth_target.view;
+		auto& tex = gpu_context->textures[rp.depth_target.texture];
+		if(view.format == GPU_FORMAT_UNDEFINED)
+			view.format = tex.format;
+
+		depth_view = get_or_create_image_view(tex, view);
+		
+		if((w && w != tex.size.w) || (h && h != tex.size.h))
+			log::warn("gpu_begin_renderpass: mismatched attachment sizes {}x{} != {}x{}", w, h, tex.size.w, tex.size.h); 
+
+		w = tex.size.w;
+		h = tex.size.h;
+	}
+
 	VkRenderingAttachmentInfo depth
 	{
 		.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
 		.pNext = nullptr,
-		.imageView = rp.depth_target.resource ? image_view_from_descriptor(*(rp.depth_target.resource)) : VK_NULL_HANDLE,
+		.imageView = depth_view,
 		.imageLayout = VK_IMAGE_LAYOUT_GENERAL,
 		.resolveMode = VK_RESOLVE_MODE_NONE,
 		.resolveImageView = VK_NULL_HANDLE,
@@ -2336,6 +2450,11 @@ void gpu_begin_renderpass(const GPUCommandBuffer& cmd, const GPURenderPassDesc& 
 		},
 		{rp.render_area.z, rp.render_area.w}
 	};
+
+	if(rp.render_area.z == 0)
+		render_area.extent.width = w;
+	if(rp.render_area.w == 0)
+		render_area.extent.height = h;
 
 	VkRenderingInfo render_info
 	{
@@ -2357,10 +2476,10 @@ void gpu_begin_renderpass(const GPUCommandBuffer& cmd, const GPURenderPassDesc& 
 
 	VkViewport viewport
 	{
-		static_cast<float>(rp.render_area.x),
-		static_cast<float>(rp.render_area.y),
-		static_cast<float>(rp.render_area.z), 
-		static_cast<float>(rp.render_area.w),
+		static_cast<float>(render_area.offset.x),
+		static_cast<float>(render_area.offset.y),
+		static_cast<float>(render_area.extent.width), 
+		static_cast<float>(render_area.extent.height),
 	       	0.0f, 1.0f
 	};
 	
@@ -2430,6 +2549,24 @@ void gpu_draw_indexed(const GPUCommandBuffer& cmd, void* data, uint32_t index_co
 		vkCmdPushConstants(cb, std::bit_cast<VkPipelineLayout>(cmd.bound_pipe->layout), cmd.bound_pipe->pconst_stage, 0, cmd.bound_pipe->pconst_size, data);
 
 	vkCmdDrawIndexed(cb, index_count, instance_count, base_index, base_vertex, base_instance);
+}
+
+void gpu_draw_indexed_indirect_count(const GPUCommandBuffer& cmd, void* data, const GPUPointer& commands, const GPUPointer& draw_count, uint32_t max_draw_count)
+{
+	assert(cmd.bound_pipe);
+	assert(!cmd.bound_pipe->is_compute);
+	assert(commands.handle);
+	assert(draw_count.handle);
+	auto cb = std::bit_cast<VkCommandBuffer>(cmd.handle);
+	auto& commands_buffer = gpu_context->buffers[commands.handle - 1];
+	auto& draw_count_buffer = gpu_context->buffers[draw_count.handle - 1];
+	assert(commands.offset + (max_draw_count * sizeof(GPUIndirectCommand)) <= commands_buffer.size);
+	assert(draw_count.offset + sizeof(uint32_t) <= draw_count_buffer.size);
+
+	if(data && cmd.bound_pipe->pconst_size)
+		vkCmdPushConstants(cb, std::bit_cast<VkPipelineLayout>(cmd.bound_pipe->layout), cmd.bound_pipe->pconst_stage, 0, cmd.bound_pipe->pconst_size, data);
+
+	vkCmdDrawIndexedIndirectCount(cb, commands_buffer.handle, commands.offset, draw_count_buffer.handle, draw_count.offset, max_draw_count, sizeof(GPUIndirectCommand));
 }
 
 VkSurfaceFormatKHR choose_swapchain_format(std::span<VkSurfaceFormatKHR> formats)
@@ -2520,24 +2657,25 @@ void gpu_create_swapchain()
 	vkGetSwapchainImagesKHR(gpu_context->device, gpu_context->swapchain, &image_count, swapchain_images.data());
 
 	gpu_context->swapchain_textures.reserve(image_count);
-	gpu_context->swapchain_texviews.reserve(image_count);
 
 	for(auto img : swapchain_images)
 	{
-		gpu_context->swapchain_textures.emplace_back(std::bit_cast<uint64_t>(img), 0, uvec3{extent.width, extent.height, 1u});
-		gpu_context->swapchain_texviews.push_back(gpu_texture_view_descriptor(gpu_context->swapchain_textures.back(), {.format = GPU_FORMAT_BGRA8_SRGB}));
+		gpu_context->textures.push_back(GPUTextureData{img, VK_NULL_HANDLE, uvec3{extent.width, extent.height, 1u}, GPU_FORMAT_BGRA8_SRGB});
+		gpu_context->swapchain_textures.push_back(GPUTexture{static_cast<uint32_t>(gpu_context->textures.size() - 1)});
 	}
-	
 }
 
 void gpu_cleanup_swapchain()
 {
-	gpu_context->swapchain_textures.clear();
-	for(auto& view : gpu_context->swapchain_texviews)
+	for(auto tex : gpu_context->swapchain_textures)
 	{
-		gpu_destroy_texture_view(view);
+		auto& texture = gpu_context->textures[tex];
+		for(auto& view : texture.views)
+			vkDestroyImageView(gpu_context->device, view.handle, nullptr);
+
+		texture.handle = VK_NULL_HANDLE;
 	}
-	gpu_context->swapchain_texviews.clear();
+	gpu_context->swapchain_textures.clear();
 
 	vkDestroySwapchainKHR(gpu_context->device, gpu_context->swapchain, nullptr);
 }
@@ -2550,12 +2688,12 @@ void gpu_swapchain_init(Window& wnd)
 		return;
 	}
 
-	gpu_context->swapchain_pmode = VK_PRESENT_MODE_FIFO_KHR; 
+	gpu_context->swapchain_pmode = VK_PRESENT_MODE_IMMEDIATE_KHR; 
 	gpu_create_swapchain();
 	gpu_context->swapchain_dirty = false;
 }
 
-GPUTextureDescriptor* gpu_swapchain_acquire_next(GPUSemaphore& sem)
+GPUTexture gpu_swapchain_acquire_next(GPUSemaphore& sem)
 {
 	ZoneScoped;
 	uint32_t image_index{0};
@@ -2583,7 +2721,7 @@ GPUTextureDescriptor* gpu_swapchain_acquire_next(GPUSemaphore& sem)
 
 	} while(gpu_context->swapchain_dirty);
 
-	return &gpu_context->swapchain_texviews[image_index];
+	return gpu_context->swapchain_textures[image_index];
 }
 
 void gpu_swapchain_present(GPUQueue queue, GPUSemaphore& sem)
@@ -2629,5 +2767,6 @@ bool gpu_swapchain_set_present_mode(GPUPresentMode mode)
 	gpu_context->swapchain_dirty = true;
 	return true;
 }
+
 
 }

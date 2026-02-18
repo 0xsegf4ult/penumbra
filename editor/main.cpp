@@ -2,6 +2,7 @@
 
 import penumbra.core;
 import penumbra.renderer;
+import penumbra.resource;
 import penumbra.ui;
 import std;
 
@@ -20,6 +21,7 @@ int main(int argc, const char** argv)
 
 	renderer_init(window);
 	imgui_add_hook([&window](){ui::draw_device_overlay(window);});
+	resource_manager_init();
 
 	auto start = std::chrono::steady_clock::now();
 
@@ -38,6 +40,7 @@ int main(int argc, const char** argv)
 		FrameMark;
 	}
 
+	resource_manager_shutdown();
 	renderer_shutdown();
 
 	}
