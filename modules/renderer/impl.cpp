@@ -38,6 +38,7 @@ struct renderer_context_t
 
 	std::array<GPUPointer, config::renderer_frames_in_flight> camera_cbv;
 
+	uvec2 last_render_resolution{800u, 600u};
 	uvec2 render_resolution{800u, 600u};
 
 	GPUTexture visbuffer_tex;
@@ -53,6 +54,40 @@ struct renderer_context_t
 };
 
 renderer_context_t* renderer = nullptr;
+
+void renderer_create_rendertargets()
+{
+	renderer->visbuffer_tex = gpu_create_texture
+	({
+		.dim = uvec3{renderer->render_resolution, 1u},
+		.format = GPU_FORMAT_R32_UINT,
+		.usage = GPU_TEXTURE_SAMPLED | GPU_TEXTURE_COLOR_ATTACHMENT
+	});
+	renderer->visbuffer = gpu_texture_view_descriptor(renderer->visbuffer_tex, {.format = GPU_FORMAT_R32_UINT});
+
+	renderer->depthbuffer_tex = gpu_create_texture
+	({
+		.dim = uvec3{renderer->render_resolution, 1u},
+		.format = GPU_FORMAT_D32_SFLOAT,
+		.usage = GPU_TEXTURE_SAMPLED | GPU_TEXTURE_DEPTH_STENCIL_ATTACHMENT
+	});
+	renderer->depthbuffer = gpu_texture_view_descriptor(renderer->depthbuffer_tex, {.format = GPU_FORMAT_D32_SFLOAT});
+
+	renderer->framebuffer_tex = gpu_create_texture
+	({
+		.dim = uvec3{renderer->render_resolution, 1u},
+		.format = GPU_FORMAT_RGBA8_UNORM,
+		.usage = GPU_TEXTURE_SAMPLED | GPU_TEXTURE_STORAGE
+	});
+	renderer->framebuffer_rw = gpu_rwtexture_view_descriptor(renderer->framebuffer_tex, {.format = GPU_FORMAT_RGBA8_UNORM});
+	renderer->framebuffer = gpu_texture_view_descriptor(renderer->framebuffer_tex, {.format = GPU_FORMAT_RGBA8_UNORM});
+
+	auto cmd = gpu_record_commands(GPU_QUEUE_GRAPHICS);
+	gpu_texture_layout_transition(cmd, renderer->visbuffer_tex, GPU_STAGE_NONE, GPU_STAGE_RASTER_OUTPUT, GPU_TEXTURE_LAYOUT_UNDEFINED, GPU_TEXTURE_LAYOUT_GENERAL);
+	gpu_texture_layout_transition(cmd, renderer->depthbuffer_tex, GPU_STAGE_NONE, GPU_STAGE_RASTER_OUTPUT, GPU_TEXTURE_LAYOUT_UNDEFINED, GPU_TEXTURE_LAYOUT_GENERAL);
+	gpu_texture_layout_transition(cmd, renderer->framebuffer_tex, GPU_STAGE_NONE, GPU_STAGE_COMPUTE, GPU_TEXTURE_LAYOUT_UNDEFINED, GPU_TEXTURE_LAYOUT_GENERAL);
+	gpu_submit(GPU_QUEUE_GRAPHICS, cmd);
+}
 
 void renderer_init(Window& wnd)
 {
@@ -84,36 +119,7 @@ void renderer_init(Window& wnd)
 	for(int i = 0; i < config::renderer_frames_in_flight; i++)
 		renderer->camera_cbv[i] = gpu_allocate_memory(sizeof(mat4), GPU_MEMORY_MAPPED, GPU_BUFFER_UNIFORM);
 
-	renderer->visbuffer_tex = gpu_create_texture
-	({
-		.dim = uvec3{renderer->render_resolution, 1u},
-		.format = GPU_FORMAT_R32_UINT,
-		.usage = GPU_TEXTURE_SAMPLED | GPU_TEXTURE_COLOR_ATTACHMENT
-	});
-	renderer->visbuffer = gpu_texture_view_descriptor(renderer->visbuffer_tex, {.format = GPU_FORMAT_R32_UINT});
-
-	renderer->depthbuffer_tex = gpu_create_texture
-	({
-		.dim = uvec3{renderer->render_resolution, 1u},
-		.format = GPU_FORMAT_D32_SFLOAT,
-		.usage = GPU_TEXTURE_SAMPLED | GPU_TEXTURE_DEPTH_STENCIL_ATTACHMENT
-	});
-	renderer->depthbuffer = gpu_texture_view_descriptor(renderer->depthbuffer_tex, {.format = GPU_FORMAT_D32_SFLOAT});
-
-	renderer->framebuffer_tex = gpu_create_texture
-	({
-		.dim = uvec3{renderer->render_resolution, 1u},
-		.format = GPU_FORMAT_RGBA8_UNORM,
-		.usage = GPU_TEXTURE_SAMPLED | GPU_TEXTURE_STORAGE
-	});
-	renderer->framebuffer_rw = gpu_rwtexture_view_descriptor(renderer->framebuffer_tex, {.format = GPU_FORMAT_RGBA8_UNORM});
-	renderer->framebuffer = gpu_texture_view_descriptor(renderer->framebuffer_tex, {.format = GPU_FORMAT_RGBA8_UNORM});
-
-	auto cmd = gpu_record_commands(GPU_QUEUE_GRAPHICS);
-	gpu_texture_layout_transition(cmd, renderer->visbuffer_tex, GPU_STAGE_NONE, GPU_STAGE_RASTER_OUTPUT, GPU_TEXTURE_LAYOUT_UNDEFINED, GPU_TEXTURE_LAYOUT_GENERAL);
-	gpu_texture_layout_transition(cmd, renderer->depthbuffer_tex, GPU_STAGE_NONE, GPU_STAGE_RASTER_OUTPUT, GPU_TEXTURE_LAYOUT_UNDEFINED, GPU_TEXTURE_LAYOUT_GENERAL);
-	gpu_texture_layout_transition(cmd, renderer->framebuffer_tex, GPU_STAGE_NONE, GPU_STAGE_COMPUTE, GPU_TEXTURE_LAYOUT_UNDEFINED, GPU_TEXTURE_LAYOUT_GENERAL);
-	gpu_submit(GPU_QUEUE_GRAPHICS, cmd);
+	renderer_create_rendertargets();
 
 	renderer->visbuffer_build_pso = gpu_create_graphics_pipeline(*load_shader("shaders/visbuffer_build_opaque"), 	
 	{
@@ -158,6 +164,22 @@ void renderer_shutdown()
 void renderer_next_frame()
 {
 	ZoneScoped;
+	
+	if(renderer->render_resolution != renderer->last_render_resolution)
+	{
+		renderer->last_render_resolution = renderer->render_resolution;
+		gpu_wait_queue(GPU_QUEUE_GRAPHICS, renderer->gfx_queue_frames[renderer->frame_index]);
+
+		gpu_destroy_texture(renderer->framebuffer_tex);
+		gpu_destroy_texture(renderer->depthbuffer_tex);
+		gpu_destroy_texture(renderer->visbuffer_tex);
+
+		gpu_free_descriptor(renderer->framebuffer);
+		gpu_free_descriptor(renderer->depthbuffer);
+		gpu_free_descriptor(renderer->visbuffer);
+
+		renderer_create_rendertargets();
+	}
 
 	renderer->frame_index = (renderer->frame_index + 1) % config::renderer_frames_in_flight;
 	if(!gpu_wait_queue(GPU_QUEUE_GRAPHICS, renderer->gfx_queue_frames[renderer->frame_index]))
@@ -310,6 +332,11 @@ GPUTextureDescriptor* renderer_get_framebuffer()
 uvec2 renderer_get_render_resolution()
 {
 	return renderer->render_resolution;
+}
+
+void renderer_update_render_resolution(uvec2 res)
+{
+	renderer->render_resolution = res;
 }
 
 void renderer_update_camera_matrices(const mat4& view, const mat4& proj)

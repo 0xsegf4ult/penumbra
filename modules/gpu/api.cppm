@@ -243,6 +243,7 @@ void gpu_destroy_texture(GPUTexture tex);
 GPUTextureDescriptor gpu_texture_view_descriptor(GPUTexture tex, const GPUViewDesc& desc);
 GPUTextureDescriptor gpu_rwtexture_view_descriptor(GPUTexture tex, const GPUViewDesc& desc);
 GPUSampler gpu_create_sampler(const GPUSamplerDesc& desc);
+void gpu_free_descriptor(GPUTextureDescriptor descriptor);
 
 GPUPipeline gpu_create_compute_pipeline(const ShaderIR& shader);
 GPUPipeline gpu_create_graphics_pipeline(const ShaderIR& shader, const GPURasterDesc& raster);

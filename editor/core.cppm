@@ -29,8 +29,11 @@ public:
 		imgui_add_hook([this](){draw_ui();});
 
 		widgets.push_back(std::make_unique<Viewport>(&wnd, renderer_get_framebuffer(), world));
+		widget_viewport = widgets.back().get();
+
 		widgets.push_back(std::make_unique<ScenegraphView>(world));
 		widgets.push_back(std::make_unique<Inspector>(world));
+
 
 		load_prefab(*world, "qmv_arena");
 	}
@@ -46,6 +49,9 @@ public:
 		
 	void variable_update(double dt)
 	{
+		auto vp_size = widget_viewport->get_size();
+		if(vp_size.x && vp_size.y)
+			renderer_update_render_resolution(vp_size);	
 		update_main_camera();
 	}
 
@@ -177,7 +183,7 @@ private:
 	Window& window;
 	WorldState* world;
 	std::vector<std::unique_ptr<Widget>> widgets;
-
+	Widget* widget_viewport;
 };
 
 }

@@ -541,9 +541,18 @@ struct BindlessResourceHeap
 			return handle;
 		}
 
-		auto handle = top;
-		top++;
-		return handle;
+		return top++;
+	}
+
+	void free(uint32_t handle)
+	{
+		if(top == handle + 1)
+		{
+			top = handle;
+			return;
+		}
+
+		freelist.push_back(handle);
 	}
 };
 
@@ -1575,6 +1584,13 @@ GPUSampler gpu_create_sampler(const GPUSamplerDesc& desc)
 	gpu_context->samplers.push_back(sampler);
 	return GPUSampler{ds_write.dstArrayElement};
 }
+
+void gpu_free_descriptor(GPUTextureDescriptor descriptor)
+{
+	bool is_rw = descriptor.flags & GPU_TEXTURE_DESCRIPTOR_RW;
+	BindlessResourceHeap& heap = is_rw ? gpu_context->bindless_rwtexture_heap : gpu_context->bindless_texture_heap;
+	heap.free(descriptor.handle);	
+}	
 
 GPUCommandBuffer gpu_record_commands(GPUQueue queue)
 {

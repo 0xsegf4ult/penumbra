@@ -17,7 +17,7 @@ export class Viewport : public Widget
 {
 public:
 	Viewport(Window* wnd, GPUTextureDescriptor* rt, WorldState* ws) : Widget("Viewport", ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse), window{wnd}, render_target{rt}, world{ws} {}
-	void pre_draw() override
+	void configure() override
 	{
 		ImGui::SetNextWindowSize(ImVec2(800, 600), ImGuiCond_FirstUseEver);
 		ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
@@ -28,7 +28,7 @@ public:
 	{
 		auto g_root_x = ImGui::GetWindowPos().x + ImGui::GetCursorPosX();
 		auto g_root_y = ImGui::GetWindowPos().y + ImGui::GetCursorPosY();
-		ImGui::Image(ImTextureID(std::intptr_t(render_target)), ImVec2(800, 600), ImVec2(0, 0), ImVec2(1, 1));
+		ImGui::Image(ImTextureID(std::intptr_t(render_target)), ImVec2(size.x, size.y), ImVec2(0, 0), ImVec2(1, 1));
 		
 		auto& camera_transform = world->entities.get<Transform>(world->main_camera);
 		if(ImGui::IsItemHovered() && ImGui::IsMouseDown(ImGuiMouseButton_Middle))
