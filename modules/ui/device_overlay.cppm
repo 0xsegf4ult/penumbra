@@ -10,7 +10,7 @@ import std;
 export namespace penumbra::ui
 {
 
-void draw_device_overlay(Window& window, uvec2 root = {0u, 0u})
+void draw_device_overlay(uvec2 root = {0u, 0u})
 {
 	const float fps = ImGui::GetIO().Framerate;
 	static bool p_open = true;

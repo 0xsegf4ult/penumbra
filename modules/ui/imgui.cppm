@@ -253,7 +253,7 @@ export void imgui_backend_render(GPUCommandBuffer& cmd, double dt)
 			hook();
 	}
 
-	ImGui::ShowDemoWindow();
+	//ImGui::ShowDemoWindow();
 
 	ImGui::Render();
 
