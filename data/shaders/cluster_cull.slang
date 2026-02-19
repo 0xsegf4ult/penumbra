@@ -14,7 +14,7 @@ struct CSInput
 struct CullingData
 {
 	float4x4 viewmat;	
-	float3 cam_pos;
+	float4 cam_pos;
 	float lod_base;
 	float lod_step;
 };

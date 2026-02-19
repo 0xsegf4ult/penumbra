@@ -47,6 +47,7 @@ private:
 struct resource_context
 {
 	std::vector<GeometryResource> geometry;
+	std::unordered_map<uint32_t, ResourceID> geometry_cache;
 };
 
 resource_context* context = nullptr;
@@ -64,6 +65,8 @@ export void resource_manager_shutdown()
 export ResourceID resource_manager_load_geometry(const vfs::path& path)
 {
 	auto phash = fnv::hash(path.c_str());
+	if(context->geometry_cache.contains(phash))
+		return context->geometry_cache[phash];
 
 	auto file = vfs::open(path, vfs::access_readonly);
 	if(!file.has_value())
@@ -133,11 +136,15 @@ export ResourceID resource_manager_load_geometry(const vfs::path& path)
 		icount,
 		coff,
 		ccount,
+		lods[0].cluster_count,
 		loff, 
 		header->num_lods,
 		renderer_resource_transfer_syncval() + 1
 	});	
-	return ResourceID{ResourceType::Geometry, static_cast<uint32_t>(context->geometry.size())};
+	
+	auto rid = ResourceID{ResourceType::Geometry, static_cast<uint32_t>(context->geometry.size())};
+	context->geometry_cache[phash] = rid;
+	return rid;
 }
 
 export const GeometryResource& resource_manager_get_geometry(const ResourceID& rid)

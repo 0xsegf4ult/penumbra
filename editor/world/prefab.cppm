@@ -132,7 +132,7 @@ export void load_prefab(WorldState& world, const vfs::path& path)
 				({
 				 	ntx,
 					RENDER_BUCKET_DEFAULT,
-					geom_data.cluster_count,
+					geom_data.l0_cluster_count,
 					geom_data.lod_offset,
 					geom_data.lod_count
 				});

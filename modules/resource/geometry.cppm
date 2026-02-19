@@ -62,6 +62,7 @@ export struct GeometryResource
 	uint32_t index_count;
 	uint32_t cluster_offset;
 	uint32_t cluster_count;
+	uint32_t l0_cluster_count;
 	uint32_t lod_offset;
 	uint32_t lod_count;
 

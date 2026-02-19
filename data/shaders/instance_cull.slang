@@ -38,7 +38,6 @@ void computeMain(uint DTid: SV_DispatchThreadID, uniform CSInput input)
 	ObjectInstance instance = input.instances[DTid];
 	if(instance.input_offset == 0)
 		return;
-	
 
 	Ptr<ObjectData, Access.Read> object = input.objects + (instance.input_offset - 1);
 	float4 center = mul(float4(object->sphere.xyz, 1.0), object->transform);

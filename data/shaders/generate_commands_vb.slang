@@ -5,6 +5,7 @@ struct CSInput
 {
 	Ptr<ClusterInstance, Access.Read> instances;
 	Ptr<uint, Access.Read> visibility;
+	Ptr<uint, Access.Read> visibility_prefixsum;
 	Ptr<IndirectCommand, Access.ReadWrite> commands;
 	Ptr<GeometryCluster, Access.Read> clusters;
 	uint count;
@@ -30,5 +31,5 @@ void computeMain(uint DTid: SV_DispatchThreadID, uniform CSInput input)
 	cmd.vertex_offset = cluster.vertex_offset;
 	cmd.instance_id = DTid;
 
-	input.commands[DTid] = cmd;
+	input.commands[input.visibility_prefixsum[DTid] - 1] = cmd;
 }

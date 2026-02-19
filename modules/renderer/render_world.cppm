@@ -31,10 +31,12 @@ struct RenderViewData
 	GPUPointer buckets;
 	GPUPointer visibility;
 	GPUPointer commands;
-	
+
+	std::vector<GPUPointer> visibility_sums;
+	std::array<uint32_t, 16> intermediate_sizes;
+
 	std::array<GPUPointer, config::renderer_frames_in_flight> cbuffer;
 	uint32_t instance_count{0};
-	uint32_t instance_out_head{0};
 
 	std::vector<uint32_t> cluster_bucket_sizes;
 	std::vector<uint32_t> cluster_bucket_offsets;
@@ -58,15 +60,22 @@ public:
 		instance_cull_cs = gpu_create_compute_pipeline(*load_shader("shaders/instance_cull"));
 		cluster_cull_cs = gpu_create_compute_pipeline(*load_shader("shaders/cluster_cull"));
 		cmdgen_vb_cs = gpu_create_compute_pipeline(*load_shader("shaders/generate_commands_vb"));
+		ps_index_cs = gpu_create_compute_pipeline(*load_shader("shaders/prefix_scan_index"));
+		ps_partial_cs = gpu_create_compute_pipeline(*load_shader("shaders/prefix_scan_add_partial"));
 	}	
 
 	~RenderWorld()
 	{
+		gpu_destroy_pipeline(ps_partial_cs);
+		gpu_destroy_pipeline(ps_index_cs);
 		gpu_destroy_pipeline(cmdgen_vb_cs);
 		gpu_destroy_pipeline(cluster_cull_cs);
 		gpu_destroy_pipeline(instance_cull_cs);
 		for(auto& view : views)
 		{
+			for(auto& mem : view.visibility_sums)
+				gpu_free_memory(mem);
+
 			for(auto& elem : view.cbuffer)
 				gpu_free_memory(elem);
 
@@ -96,6 +105,16 @@ public:
 
 		view.cluster_bucket_sizes.resize(RENDER_BUCKET_COUNT);
 		view.cluster_bucket_offsets.resize(RENDER_BUCKET_COUNT);
+
+		view.visibility_sums.push_back(gpu_allocate_memory(sizeof(uint32_t) * 65536));
+		uint32_t n = (65536 / 512) + 1u;
+		while(n > 1)
+		{
+			view.visibility_sums.push_back(gpu_allocate_memory(sizeof(uint32_t) * n));
+			n = (n / 512) + 1u;
+		}
+
+		view.visibility_sums.push_back(gpu_allocate_memory(sizeof(uint32_t)));
 
 		return RenderView{static_cast<uint32_t>(views.size())};
 	}
@@ -271,6 +290,8 @@ public:
 
 		gpu_barrier(cmd, GPU_STAGE_COMPUTE, GPU_STAGE_COMPUTE);
 
+		compact_drawcalls(cmd);
+
 		gpu_set_pipeline(cmd, cmdgen_vb_cs);
 
 		for(auto& view : views)
@@ -283,6 +304,7 @@ public:
 			{
 				GPUDevicePointer cluster_instances;
 				GPUDevicePointer visibility;
+				GPUDevicePointer visibility_prefixsum;
 				GPUDevicePointer commands;
 				GPUDevicePointer clusters;
 				uint32_t count;
@@ -290,6 +312,7 @@ public:
 
 			shader_data.cluster_instances = gpu_host_to_device_pointer(view.clusters);
 			shader_data.visibility = gpu_host_to_device_pointer(view.visibility);
+			shader_data.visibility_prefixsum = gpu_host_to_device_pointer(view.visibility_sums[0]);
 			shader_data.commands = gpu_host_to_device_pointer(view.commands);
 			shader_data.clusters = renderer_geometry_cluster_device_pointer();
 			shader_data.count = size;
@@ -320,6 +343,72 @@ public:
 		};
 	}		
 private:
+	void compact_drawcalls(GPUCommandBuffer& cmd)
+	{
+		gpu_set_pipeline(cmd, ps_index_cs);
+			
+		struct PSIndexData
+		{
+			GPUDevicePointer input;
+			GPUDevicePointer output;
+			GPUDevicePointer partial;
+			uint32_t count;
+		} ps_index_data;
+
+		struct PSPartialData
+		{
+			GPUDevicePointer input;
+			GPUDevicePointer output;
+			uint32_t count;
+		} ps_partial_data;
+
+		for(auto& view : views)
+		{
+			auto size = view.cluster_bucket_offsets.back() + view.cluster_bucket_sizes.back();
+			if(!size)
+				continue;
+
+			ps_index_data.input = gpu_host_to_device_pointer(view.visibility);
+			ps_index_data.output = gpu_host_to_device_pointer(view.visibility_sums[0]);
+			ps_index_data.partial = gpu_host_to_device_pointer(view.visibility_sums[1]);
+			ps_index_data.count = size;
+			view.intermediate_sizes[0] = size;
+			size = (size / 512u) + 1u;
+			gpu_dispatch(cmd, &ps_index_data, {size, 1u, 1u});
+		}
+
+		gpu_barrier(cmd, GPU_STAGE_COMPUTE, GPU_STAGE_COMPUTE);
+
+		for(auto& view : views)
+		{
+			auto size = (view.intermediate_sizes[0] / 512u) + 1u;
+
+			for(uint32_t i = 1 ; i < view.visibility_sums.size() - 1; i++)
+			{
+				gpu_set_pipeline(cmd, ps_index_cs);
+
+				ps_index_data.input = gpu_host_to_device_pointer(view.visibility_sums[i]);
+				ps_index_data.output = gpu_host_to_device_pointer(view.visibility_sums[i]);
+				ps_index_data.partial = gpu_host_to_device_pointer(view.visibility_sums[i + 1]);
+				ps_index_data.count = size;
+				view.intermediate_sizes[i] = size;
+				size = (size / 512u) + 1;
+				gpu_dispatch(cmd, &ps_index_data, {size, 1u, 1u});
+
+				gpu_barrier(cmd, GPU_STAGE_COMPUTE, GPU_STAGE_COMPUTE);
+
+				gpu_set_pipeline(cmd, ps_partial_cs);
+
+				ps_partial_data.input = gpu_host_to_device_pointer(view.visibility_sums[i]);
+				ps_partial_data.output = gpu_host_to_device_pointer(view.visibility_sums[i - 1]);
+				ps_partial_data.count = view.intermediate_sizes[i - 1];
+				gpu_dispatch(cmd, &ps_partial_data, {view.intermediate_sizes[i], 1u, 1u});
+
+				gpu_barrier(cmd, GPU_STAGE_COMPUTE, GPU_STAGE_COMPUTE);
+			}
+		}
+	}
+
 	std::vector<RenderViewData> views;
 	std::vector<RenderObject> dirty_objects;
 
@@ -332,6 +421,8 @@ private:
 	GPUPipeline instance_cull_cs;
 	GPUPipeline cluster_cull_cs;
 	GPUPipeline cmdgen_vb_cs;
+	GPUPipeline ps_index_cs;
+	GPUPipeline ps_partial_cs;
 };
 
 }

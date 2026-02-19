@@ -35,7 +35,7 @@ public:
 		widgets.push_back(std::make_unique<Inspector>(world));
 
 
-		load_prefab(*world, "qmv_arena");
+		load_prefab(*world, "bistrov2");
 	}
 
 	~Editor()

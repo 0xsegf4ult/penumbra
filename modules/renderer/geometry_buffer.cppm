@@ -64,7 +64,7 @@ struct geometry_buffer_state
 	
 	uint32_t vertex_capacity{10000000u};
 	uint32_t index_capacity{50000000u};
-	uint32_t cluster_capacity{65536u};
+	uint32_t cluster_capacity{131072u};
 	uint32_t lod_capacity{65536u};
 };
 
@@ -120,6 +120,9 @@ export void renderer_geometry_clear()
 export uint32_t renderer_geometry_push_vertices(const geom_position_format* pos_data, const geom_uv_format* uv_data, const geom_nor_tan_format* nrm_data, uint32_t count)
 {
 	auto offset = state.host_vertex_count;
+	if(offset + count >= state.vertex_capacity)
+		log::warn("renderer_geometry_buffer: out of vertex memory!");
+
 	memcpy(gpu_map_memory(state.host_vertex_pos) + (offset * sizeof(geom_position_format)), pos_data, count * sizeof(geom_position_format));
 	memcpy(gpu_map_memory(state.host_vertex_uv) + (offset * sizeof(geom_uv_format)), uv_data, count * sizeof(geom_uv_format));
 	memcpy(gpu_map_memory(state.host_vertex_nor_tan) + (offset * sizeof(geom_nor_tan_format)), nrm_data, count * sizeof(geom_nor_tan_format));
@@ -130,6 +133,9 @@ export uint32_t renderer_geometry_push_vertices(const geom_position_format* pos_
 export uint32_t renderer_geometry_push_indices(const geom_index_format* data, uint32_t count)
 {
 	auto offset = state.host_index_count;
+	if(offset + count >= state.index_capacity)
+		log::warn("renderer_geometry_buffer: out of index memory!");
+
 	memcpy(gpu_map_memory(state.host_indices) + (offset * sizeof(geom_index_format)), data, count * sizeof(geom_index_format));
 	state.host_index_count += count;
 	return offset;
@@ -138,6 +144,9 @@ export uint32_t renderer_geometry_push_indices(const geom_index_format* data, ui
 export uint32_t renderer_geometry_push_clusters(const geom_cluster_format* data, uint32_t count)
 {
 	auto offset = state.host_cluster_count;
+	if(offset + count >= state.cluster_capacity)
+		log::warn("renderer_geometry_buffer: out of cluster memory!");
+	
 	memcpy(gpu_map_memory(state.host_clusters) + (offset * sizeof(geom_cluster_format)), data, count * sizeof(geom_cluster_format));
 	state.host_cluster_count += count;
 	return offset;
@@ -146,6 +155,9 @@ export uint32_t renderer_geometry_push_clusters(const geom_cluster_format* data,
 export uint32_t renderer_geometry_push_lods(const geom_lod_format* data, uint32_t count)
 {
 	auto offset = state.host_lod_count;
+	if(offset + count >= state.lod_capacity)
+		log::warn("renderer_geometry_buffer: out of LOD memory!");
+
 	memcpy(gpu_map_memory(state.host_lods) + (offset * sizeof(geom_lod_format)), data, count * sizeof(geom_lod_format));
 	state.host_lod_count += count;
 	return offset;
