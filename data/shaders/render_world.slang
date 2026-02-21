@@ -52,3 +52,23 @@ struct IndirectCommand
 	int vertex_offset;
 	uint instance_id;
 };
+
+[Flags]
+enum CullingFlags : uint
+{
+	FrustumCull,
+	OcclusionCull,
+	IsOrtho
+};
+
+struct CullingData
+{
+	float4x4 viewmat;	
+	float4 frustum_planes[4];
+	float lod_base;
+	float lod_step;
+	float znear;
+	float zfar;
+	CullingFlags flags;	
+};
+

@@ -7,6 +7,7 @@ endif()
 target_link_libraries(penumbra_math PUBLIC ${PENUMBRA_MATH_LIBRARIES})
 target_sources(penumbra_math PUBLIC FILE_SET CXX_MODULES FILES
 	matrix.cppm
+	plane.cppm
 	quaternion.cppm
 	transform.cppm
 	vector.cppm

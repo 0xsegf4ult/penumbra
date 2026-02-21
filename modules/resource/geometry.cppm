@@ -65,7 +65,7 @@ export struct GeometryResource
 	uint32_t l0_cluster_count;
 	uint32_t lod_offset;
 	uint32_t lod_count;
-
+	vec4 sphere;
 	uint64_t syncval;
 };
 

@@ -11,13 +11,6 @@ struct CSInput
 	uint count;
 };
 
-struct CullingData
-{
-	float4x4 viewmat;	
-	float lod_base;
-	float lod_step;
-};
-
 ConstantBuffer<CullingData> culling_data;
 
 bool is_visible(float4 center, float radius, float3 cone, float cone_cutoff)

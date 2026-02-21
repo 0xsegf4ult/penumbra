@@ -217,6 +217,7 @@ export void load_prefab(WorldState& world, const vfs::path& path)
 				({
 				 	ntx,
 					bucket,
+					geom_data.sphere,
 					material.get_handle(),
 					geom_data.l0_cluster_count,
 					geom_data.lod_offset,

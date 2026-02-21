@@ -121,6 +121,7 @@ ResourceID resource_manager_load_geometry(const vfs::path& path)
 		lods[0].cluster_count,
 		loff, 
 		header->num_lods,
+		header->sphere,
 		renderer_resource_transfer_syncval() + 1
 	});	
 	

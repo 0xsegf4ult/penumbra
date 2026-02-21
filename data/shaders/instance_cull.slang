@@ -11,18 +11,27 @@ struct CSInput
 	uint count;
 };
 
-struct CullingData
-{
-	float4x4 viewmat;	
-	float lod_base;
-	float lod_step;
-};
-
 ConstantBuffer<CullingData> culling_data;
 
-bool is_visible(float4 center, float radius)
+bool is_visible(float4 sphere, float radius)
 {
 	bool visible = true;
+	float3 center = mul(sphere, culling_data.viewmat).xyz;
+
+	if(culling_data.flags & CullingFlags.FrustumCull)	
+	{
+		if(culling_data.flags & CullingFlags.IsOrtho)	
+		{
+			for(int i = 0; i < 4; i++)
+				visible = visible && dot(culling_data.frustum_planes[i], float4(center, 1.0)) > -radius;
+		}
+		else
+		{
+			visible = visible && center.z * culling_data.frustum_planes[0].y - abs(center.x) * culling_data.frustum_planes[0].x > -radius;
+			visible = visible && center.z * culling_data.frustum_planes[0].w - abs(center.y) * culling_data.frustum_planes[0].z > -radius;
+			visible = visible && -center.z + radius > culling_data.znear && -center.z - radius < culling_data.zfar;
+		}
+	}
 
 	return visible;
 }

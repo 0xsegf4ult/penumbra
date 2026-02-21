@@ -19,8 +19,12 @@ namespace penumbra
 struct RenderViewCBuffer
 {
 	mat4 viewmat;
+	vec4 frustum_planes[4];
 	float lod_step;
 	float lod_base;
+	float znear;
+	float zfar;
+	uint32_t flags;	
 };
 
 struct RenderViewData
@@ -129,6 +133,14 @@ public:
 		auto& rv = views[render_view - 1];
 		auto* cbuffer = reinterpret_cast<RenderViewCBuffer*>(gpu_map_memory(rv.cbuffer[renderer_gfx_frame_index()]));
 		cbuffer->viewmat = view;
+		
+		mat4 projT = mat4::transpose(proj);
+		const vec4 frustumX = Plane(projT[3] + projT[0]).normalize().as_vector();
+		const vec4 frustumY = Plane(projT[3] + projT[1]).normalize().as_vector();
+		cbuffer->frustum_planes[0] = vec4{frustumX.x, frustumX.z, frustumY.y, frustumY.z};
+
+		cbuffer->znear = 0.1f;
+		cbuffer->zfar = 128.0f;
 	}
 
 	RenderObject insert_object(const RenderObjectDescription& data, array_proxy<RenderView> view_list)
@@ -142,6 +154,7 @@ public:
 		RenderObjectData* obj = reinterpret_cast<RenderObjectData*>(gpu_map_memory(host_objects)) + object_count;
 
 		obj->transform = data.transform.as_matrix();
+		obj->sphere = data.sphere;
 		obj->material_offset = data.material_offset;
 		obj->geom_lod_offset = data.geom_lod_offset;
 		obj->pack_bucket_lod_count = (data.bucket << 16) | data.geom_lod_count;
@@ -217,6 +230,7 @@ public:
 			auto* cbuffer = reinterpret_cast<RenderViewCBuffer*>(gpu_map_memory(view.cbuffer[renderer_gfx_frame_index()]));
 			cbuffer->lod_base = 10.0f;
 			cbuffer->lod_step = 1.5f;
+			cbuffer->flags = 1;
 
 			for(int i = 0; i < RENDER_BUCKET_COUNT; i++)
 			{
