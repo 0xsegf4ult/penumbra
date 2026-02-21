@@ -92,6 +92,7 @@ struct renderer_context_t
 	GPUTextureDescriptor framebuffer_rw;
 
 	GPUPipeline visbuffer_build_pso;
+	GPUPipeline visbuffer_build_alphamask_pso;
 	GPUPipeline vb_resolve_cs;
 
 	std::vector<visbuffer_read_hook> visbuffer_read_hooks;
@@ -196,6 +197,12 @@ void renderer_init(Window& wnd)
 		.color_targets = {GPU_FORMAT_R32_UINT},
 		.depth_format = GPU_FORMAT_D32_SFLOAT
 	});
+	
+	renderer->visbuffer_build_alphamask_pso = gpu_create_graphics_pipeline(load_shader("shaders/visbuffer_build_alphamask"), 	
+	{
+		.color_targets = {GPU_FORMAT_R32_UINT},
+		.depth_format = GPU_FORMAT_D32_SFLOAT
+	});
 
 	renderer->vb_resolve_cs = gpu_create_compute_pipeline(load_shader("shaders/visbuffer_resolve"));
 }
@@ -205,6 +212,7 @@ void renderer_shutdown()
 	gpu_wait_idle();
 
 	gpu_destroy_pipeline(renderer->vb_resolve_cs);
+	gpu_destroy_pipeline(renderer->visbuffer_build_alphamask_pso);
 	gpu_destroy_pipeline(renderer->visbuffer_build_pso);
 
 	gpu_destroy_texture(renderer->framebuffer_tex);
@@ -357,6 +365,35 @@ void renderer_process_frame(double dt)
 
 	gpu_bind_index_buffer(cmd, renderer_geometry_index_pointer(), GPU_INDEX_TYPE_U8);
 	gpu_draw_indexed_indirect_count(cmd, &shader_data, draw_data.commands, draw_data.counter, draw_data.max_instance_count);
+
+	auto ds_draw_data = renderer_world_get_bucket(renderer->camera_view, RENDER_BUCKET_DOUBLE_SIDED);
+	gpu_set_cull_mode(cmd, GPU_CULLMODE_NONE);
+	
+	gpu_draw_indexed_indirect_count(cmd, &shader_data, ds_draw_data.commands, ds_draw_data.counter, ds_draw_data.max_instance_count);
+
+	gpu_set_pipeline(cmd, renderer->visbuffer_build_alphamask_pso);
+	gpu_set_depth_stencil_state(cmd, reverse_z);
+	
+	gpu_write_cbuffer_descriptor(cmd, renderer->visbuffer_cbv[renderer->frame_index]);
+
+	struct VBBuildAlphaData
+	{
+		GPUDevicePointer objects;
+		GPUDevicePointer instances;
+		GPUDevicePointer materials;
+	} am_shader_data;
+	am_shader_data.objects = shader_data.objects;
+	am_shader_data.instances = shader_data.instances;
+	am_shader_data.materials = gpu_host_to_device_pointer(renderer->materials.data); 
+
+	auto am_ds_draw_data = renderer_world_get_bucket(renderer->camera_view, RENDER_BUCKET_ALPHA_MASKED_DOUBLE_SIDED);
+	gpu_draw_indexed_indirect_count(cmd, &am_shader_data, am_ds_draw_data.commands, am_ds_draw_data.counter, am_ds_draw_data.max_instance_count);
+
+	gpu_set_cull_mode(cmd, GPU_CULLMODE_CW);
+	auto alphamask_draw_data = renderer_world_get_bucket(renderer->camera_view, RENDER_BUCKET_ALPHA_MASKED);
+
+	gpu_draw_indexed_indirect_count(cmd, &am_shader_data, alphamask_draw_data.commands, alphamask_draw_data.counter, alphamask_draw_data.max_instance_count);
+
 	gpu_end_renderpass(cmd);
 
 	gpu_barrier(cmd, GPU_STAGE_RASTER_OUTPUT, GPU_STAGE_COMPUTE);

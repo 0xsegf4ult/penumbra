@@ -306,16 +306,20 @@ public:
 			struct CMDGenCSData
 			{
 				GPUDevicePointer cluster_instances;
+				GPUDevicePointer objects;
 				GPUDevicePointer visibility;
 				GPUDevicePointer visibility_prefixsum;
+				GPUDevicePointer buckets;
 				GPUDevicePointer commands;
 				GPUDevicePointer clusters;
 				uint32_t count;
 			} shader_data;
 
 			shader_data.cluster_instances = gpu_host_to_device_pointer(view.clusters);
+			shader_data.objects = gpu_host_to_device_pointer(objects);
 			shader_data.visibility = gpu_host_to_device_pointer(view.visibility);
 			shader_data.visibility_prefixsum = gpu_host_to_device_pointer(view.visibility_sums[0]);
+			shader_data.buckets = gpu_host_to_device_pointer(view.buckets[renderer_gfx_frame_index()]);
 			shader_data.commands = gpu_host_to_device_pointer(view.commands);
 			shader_data.clusters = renderer_geometry_cluster_device_pointer();
 			shader_data.count = size;
