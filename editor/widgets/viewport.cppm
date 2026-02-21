@@ -60,10 +60,31 @@ public:
 			auto delta = window->get_mouse_delta();
 			auto rot = camera_transform.rotation;
 
-			Quaternion yaw = Quaternion::from_axis_angle(vector_world_up, to_radians(delta.x));
-			Quaternion pitch = Quaternion::from_axis_angle(vector_world_right, to_radians(delta.y));
-			Quaternion new_rot = yaw * rot * pitch;
-			camera_transform.rotation = new_rot;
+			if(ImGui::IsKeyDown(ImGuiKey_LeftShift))
+			{
+				vec3 right = vector_world_right;
+				vec3 front = vector_world_forward;
+				
+				vec3 target_dir{0.0f};
+				if(delta.x < 0.0)
+					target_dir += right;
+				else if(delta.x > 0.0)
+					target_dir -= right;
+
+				if(delta.y < 0.0)
+					target_dir -= front;
+				else if(delta.y > 0.0)
+					target_dir += front;
+
+				camera_transform.translation += (target_dir * 3.0f * ImGui::GetIO().DeltaTime);
+			}
+			else
+			{
+				Quaternion yaw = Quaternion::from_axis_angle(vector_world_up, to_radians(-delta.x * 0.2f));
+				Quaternion pitch = Quaternion::from_axis_angle(vector_world_right, to_radians(-delta.y * 0.2f));
+				Quaternion new_rot = yaw * rot * pitch;
+				camera_transform.rotation = new_rot;
+			}
 		}
 
 		transform_gizmo(g_root_x, g_root_y);

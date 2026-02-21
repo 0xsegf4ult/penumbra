@@ -97,7 +97,7 @@ private:
 
 		const float near = camera.near_plane;
 
-		mat4 view = mat4::make_translation(-camera_transform.translation);
+		mat4 view = mat4::make_translation(-camera_transform.translation) * Quaternion::make_mat4(~camera_transform.rotation);
 
 		mat4 proj;
 
