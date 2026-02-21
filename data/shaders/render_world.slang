@@ -4,6 +4,7 @@ struct ObjectData
 {
 	float4x4 transform;
 	float4 sphere;
+	uint material_offset;
 	uint lod_offset;
 	uint pack_bucket_lcount;
 };

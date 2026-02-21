@@ -14,7 +14,6 @@ struct CSInput
 struct CullingData
 {
 	float4x4 viewmat;	
-	float4 cam_pos;
 	float lod_base;
 	float lod_step;
 };
@@ -51,5 +50,4 @@ void computeMain(uint DTid: SV_DispatchThreadID, uniform CSInput input)
 		InterlockedAdd(input.buckets[bucket].count, 1u);
 		input.visibility[DTid] = 1;
 	}	
-
-
+}

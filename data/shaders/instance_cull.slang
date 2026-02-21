@@ -14,7 +14,6 @@ struct CSInput
 struct CullingData
 {
 	float4x4 viewmat;	
-	float4 cam_pos;
 	float lod_base;
 	float lod_step;
 };
@@ -47,7 +46,8 @@ void computeMain(uint DTid: SV_DispatchThreadID, uniform CSInput input)
 	uint bucket = object->pack_bucket_lcount >> 16;
 	uint global_offset = input.buckets[bucket].offset;
 
-	float dist = distance(center.xyz, culling_data.cam_pos.xyz);
+	float3 cam_pos = -culling_data.viewmat[3].xyz;
+	float dist = distance(center.xyz, cam_pos);
 	uint lodIndex = uint(max(1.0 + log(dist / culling_data.lod_base) / log(culling_data.lod_step), 0.0));
 	lodIndex = min(lodIndex, lod_count - 1);
 

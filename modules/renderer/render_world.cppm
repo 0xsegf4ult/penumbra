@@ -19,7 +19,6 @@ namespace penumbra
 struct RenderViewCBuffer
 {
 	mat4 viewmat;
-	vec4 cam_pos;
 	float lod_step;
 	float lod_base;
 };
@@ -28,7 +27,7 @@ struct RenderViewData
 {
 	GPUPointer instances;
 	GPUPointer clusters;
-	GPUPointer buckets;
+	std::array<GPUPointer, config::renderer_frames_in_flight> buckets;
 	GPUPointer visibility;
 	GPUPointer commands;
 
@@ -46,6 +45,7 @@ struct RenderObjectData
 {
 	mat4 transform;
 	vec4 sphere;
+	uint32_t material_offset;
 	uint32_t geom_lod_offset;
 	uint32_t pack_bucket_lod_count;
 };
@@ -81,7 +81,8 @@ public:
 
 			gpu_free_memory(view.commands);
 			gpu_free_memory(view.visibility);
-			gpu_free_memory(view.buckets);
+			for(auto& b : view.buckets)
+				gpu_free_memory(b);
 			gpu_free_memory(view.clusters);
 			gpu_free_memory(view.instances);
 		}
@@ -97,11 +98,13 @@ public:
 		auto& view = views.back();
 		view.instances = gpu_allocate_memory(sizeof(uvec2) * object_capacity, GPU_MEMORY_MAPPED); 
 		view.clusters = gpu_allocate_memory(sizeof(uvec2) * 65536);
-		view.buckets = gpu_allocate_memory(sizeof(uvec2) * RENDER_BUCKET_COUNT, GPU_MEMORY_MAPPED, GPU_BUFFER_INDIRECT);
 		view.visibility = gpu_allocate_memory(sizeof(uint32_t) * 65536);
 		view.commands = gpu_allocate_memory(sizeof(GPUIndirectCommand) * 65536, GPU_MEMORY_PRIVATE, GPU_BUFFER_INDIRECT);
 		for(int i = 0; i < config::renderer_frames_in_flight; i++)
+		{
 			view.cbuffer[i] = gpu_allocate_memory(sizeof(RenderViewCBuffer), GPU_MEMORY_MAPPED, GPU_BUFFER_UNIFORM);
+			view.buckets[i] = gpu_allocate_memory(sizeof(uvec2) * RENDER_BUCKET_COUNT, GPU_MEMORY_MAPPED, GPU_BUFFER_INDIRECT);
+		}
 
 		view.cluster_bucket_sizes.resize(RENDER_BUCKET_COUNT);
 		view.cluster_bucket_offsets.resize(RENDER_BUCKET_COUNT);
@@ -139,6 +142,7 @@ public:
 		RenderObjectData* obj = reinterpret_cast<RenderObjectData*>(gpu_map_memory(host_objects)) + object_count;
 
 		obj->transform = data.transform.as_matrix();
+		obj->material_offset = data.material_offset;
 		obj->geom_lod_offset = data.geom_lod_offset;
 		obj->pack_bucket_lod_count = (data.bucket << 16) | data.geom_lod_count;
 		
@@ -211,7 +215,6 @@ public:
 		for(auto& view : views)
 		{
 			auto* cbuffer = reinterpret_cast<RenderViewCBuffer*>(gpu_map_memory(view.cbuffer[renderer_gfx_frame_index()]));
-			cbuffer->cam_pos = vec4{0.0f, 0.0f, 0.0f, 1.0f};
 			cbuffer->lod_base = 10.0f;
 			cbuffer->lod_step = 1.5f;
 
@@ -221,7 +224,7 @@ public:
 				for(int j = 0; j < i; j++)
 					view.cluster_bucket_offsets[i] += view.cluster_bucket_sizes[j];
 
-				uvec2* bucket = reinterpret_cast<uvec2*>(gpu_map_memory(view.buckets)) + i;
+				uvec2* bucket = reinterpret_cast<uvec2*>(gpu_map_memory(view.buckets[renderer_gfx_frame_index()])) + i;
 				*bucket = {view.cluster_bucket_offsets[i], 0};
 			}
 
@@ -248,7 +251,7 @@ public:
 
 			shader_data.instances = gpu_host_to_device_pointer(view.instances);
 			shader_data.clusters = gpu_host_to_device_pointer(view.clusters);
-			shader_data.buckets = gpu_host_to_device_pointer(view.buckets);
+			shader_data.buckets = gpu_host_to_device_pointer(view.buckets[renderer_gfx_frame_index()]);
 			shader_data.objects = gpu_host_to_device_pointer(objects);
 			shader_data.lods = renderer_geometry_lod_device_pointer();
 			shader_data.count = view.instance_count;
@@ -279,7 +282,7 @@ public:
 			
 			shader_data.cluster_instances = gpu_host_to_device_pointer(view.clusters);
 			shader_data.visibility = gpu_host_to_device_pointer(view.visibility);
-			shader_data.buckets = gpu_host_to_device_pointer(view.buckets);
+			shader_data.buckets = gpu_host_to_device_pointer(view.buckets[renderer_gfx_frame_index()]);
 			shader_data.objects = gpu_host_to_device_pointer(objects);
 			shader_data.clusters = renderer_geometry_cluster_device_pointer();
 			shader_data.count = size;
@@ -336,7 +339,7 @@ public:
 		return
 		{
 			view.commands + (view.cluster_bucket_offsets[bucket] * sizeof(GPUIndirectCommand)),
-			view.buckets + (bucket * sizeof(uvec2) + sizeof(uint32_t)),
+			view.buckets[renderer_gfx_frame_index()] + (bucket * sizeof(uvec2) + sizeof(uint32_t)),
 				
 			view.clusters,
 			view.cluster_bucket_sizes[bucket]

@@ -33,6 +33,11 @@ struct ResourceHandle<T> where T: IOpaqueDescriptor
 		inner = value;
 	}
 
+	bool valid()
+	{
+		return inner > 0;
+	}
+
         property DescriptorHandle<T> desc
         {
                 get {

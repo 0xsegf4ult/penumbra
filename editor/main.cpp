@@ -1,6 +1,7 @@
 #include <tracy/Tracy.hpp>
 
 import penumbra.core;
+import penumbra.gpu;
 import penumbra.renderer;
 import penumbra.resource;
 import penumbra.ui;
@@ -93,6 +94,7 @@ int main(int argc, const char** argv)
 		FrameMark;
 	}
 
+	gpu_wait_idle();
 	editor.reset();
 
 	resource_manager_shutdown();

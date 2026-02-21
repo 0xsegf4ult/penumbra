@@ -28,7 +28,7 @@ export struct RenderObjectDescription
 {
 	Transform transform;
 	RenderBucket bucket;
-
+	uint32_t material_offset;
 	uint32_t geom_l0_cluster_count;	
 	uint32_t geom_lod_offset;
 	uint32_t geom_lod_count;
