@@ -204,7 +204,7 @@ export void load_prefab(WorldState& world, const vfs::path& path)
 
 				if(smc->material)
 				{
-					material = mtl_map[smc->material];
+					material = mtl_map[smc->material - 1];
 					if(material.get_handle())
 					{
 						auto& mtl_info = resource_manager_get_material(material);

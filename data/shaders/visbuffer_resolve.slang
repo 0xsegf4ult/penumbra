@@ -128,7 +128,7 @@ void computeMain(uint groupIndex : SV_GroupIndex, uint2 Gid : SV_GroupID, unifor
 		);
 	}
 
-	MaterialPBR mtl = input.materials[material > 0 ? material - 1 : 0];
+	MaterialPBR mtl = input.materials[material];
 
 	bool is_backface;
 	float hit_depth;

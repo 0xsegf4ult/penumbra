@@ -8,6 +8,7 @@ import :world_state;
 
 import penumbra.ecs;
 import penumbra.resource;
+import penumbra.renderer;
 import imgui;
 import std;
 
@@ -102,6 +103,8 @@ private:
 	{
 		if(ImGui::CollapsingHeader("Material"))
 		{
+			ImGui::Text("%s", mtl.name.c_str());
+
 			vec3 df = mtl.factors.diffuse;
 			float rf = mtl.factors.roughness;
 			float mf = mtl.factors.metallic;
@@ -115,6 +118,9 @@ private:
 			ImGui::DragFloat("Normal factor", &nf, 0.01f, 0.0f, 1.0f);
 			ImGui::DragFloat("Reflectivity", &refl, 0.01f, 0.0f, 1.0f);
 			ImGui::ColorEdit3("Emissive color", &ef.x);
+
+			if(mtl.flags & RENDER_MATERIAL_ALPHA_MASK)
+				ImGui::Text("MATERIAL_FLAG_ALPHA_MASK");
 		}
 	}
 
