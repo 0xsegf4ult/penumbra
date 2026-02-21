@@ -176,14 +176,47 @@ export void load_prefab(WorldState& world, const vfs::path& path)
 				}
 
 				ResourceID material;
+				RenderBucket bucket = RENDER_BUCKET_DEFAULT;
+			
+				auto determine_bucket = [](uint32_t mtl_flags) -> RenderBucket
+				{
+					if(mtl_flags & RENDER_MATERIAL_ALPHA_MASK)
+					{
+						if(mtl_flags & RENDER_MATERIAL_DOUBLESIDED)
+							return RENDER_BUCKET_ALPHA_MASKED_DOUBLE_SIDED;
+
+						return RENDER_BUCKET_ALPHA_MASKED;
+					}
+
+					if(mtl_flags & RENDER_MATERIAL_ALPHA_BLEND)
+					{
+						if(mtl_flags & RENDER_MATERIAL_DOUBLESIDED)
+							return RENDER_BUCKET_TRANSPARENT_DOUBLE_SIDED;
+
+						return RENDER_BUCKET_TRANSPARENT;
+					}
+
+					if(mtl_flags & RENDER_MATERIAL_DOUBLESIDED)
+						return RENDER_BUCKET_DOUBLE_SIDED;
+
+					return RENDER_BUCKET_DEFAULT;
+				};
+
 				if(smc->material)
+				{
 					material = mtl_map[smc->material];
+					if(material.get_handle())
+					{
+						auto& mtl_info = resource_manager_get_material(material);
+						bucket = determine_bucket(mtl_info.flags);
+					}
+				}
 
 				auto& geom_data = resource_manager_get_geometry(geom);
 				auto rd_object = renderer_world_insert_object
 				({
 				 	ntx,
-					RENDER_BUCKET_DEFAULT,
+					bucket,
 					material.get_handle(),
 					geom_data.l0_cluster_count,
 					geom_data.lod_offset,
