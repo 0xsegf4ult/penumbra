@@ -115,7 +115,7 @@ private:
 		};
 
 
-		renderer_update_camera_matrices(view, proj);
+		renderer_update_camera(view, proj, camera.get_exposure());
 	}
 
 

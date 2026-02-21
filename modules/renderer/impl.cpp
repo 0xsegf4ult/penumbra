@@ -39,6 +39,23 @@ struct TextureWriteRequest
 	uint32_t num_layers;
 };
 
+struct VisbufferCBuffer
+{
+	mat4 camera;
+	mat4 inverse_projection;
+	mat4 inverse_view;
+
+	GPUDevicePointer vertex_pos;
+	GPUDevicePointer vertex_uv;
+	GPUDevicePointer vertex_nor_tan;
+	GPUDevicePointer geom_indices;
+	vec2 res;
+	vec2 inv_res;
+	vec4 light_direction;
+	vec4 light_color;
+	float exposure;
+};
+
 struct renderer_context_t
 {
 	Window* window;
@@ -56,9 +73,8 @@ struct renderer_context_t
 
 	RenderWorld render_world;
 	RenderView camera_view;
-	mat4 camera_matrix;
 
-	std::array<GPUPointer, config::renderer_frames_in_flight> camera_cbv;
+	std::array<GPUPointer, config::renderer_frames_in_flight> visbuffer_cbv;
 
 	uvec2 last_render_resolution{800u, 600u};
 	uvec2 render_resolution{800u, 600u};
@@ -76,7 +92,9 @@ struct renderer_context_t
 	GPUTextureDescriptor framebuffer_rw;
 
 	GPUPipeline visbuffer_build_pso;
-	GPUPipeline vb_visualize_cs;
+	GPUPipeline vb_resolve_cs;
+
+	std::vector<visbuffer_read_hook> visbuffer_read_hooks;
 };
 
 renderer_context_t* renderer = nullptr;
@@ -143,11 +161,32 @@ void renderer_init(Window& wnd)
 	renderer->camera_view = renderer->render_world.register_view();
 
 	for(int i = 0; i < config::renderer_frames_in_flight; i++)
-		renderer->camera_cbv[i] = gpu_allocate_memory(sizeof(mat4), GPU_MEMORY_MAPPED, GPU_BUFFER_UNIFORM);
+	{
+		renderer->visbuffer_cbv[i] = gpu_allocate_memory(sizeof(VisbufferCBuffer), GPU_MEMORY_MAPPED, GPU_BUFFER_UNIFORM);
+
+		VisbufferCBuffer* vbconst = reinterpret_cast<VisbufferCBuffer*>(gpu_map_memory(renderer->visbuffer_cbv[i]));
+		vbconst->vertex_pos = renderer_geometry_vertex_pos_device_pointer();
+		vbconst->vertex_uv = renderer_geometry_vertex_uv_device_pointer();
+		vbconst->vertex_nor_tan = renderer_geometry_vertex_nor_tan_device_pointer();
+		vbconst->geom_indices = renderer_geometry_index_device_pointer();
+		vbconst->light_direction = vec4{-0.14f, -0.3f, -0.3f, 0.0f};
+		vbconst->light_color = vec4{0.68f * 38000.0f, 0.53f * 38000.0f, 0.46f * 38000.0f, 0.0f};
+	}
 
 	renderer->stream_buffer.chunks.push_back({gpu_allocate_memory(StreamBuffer::chunk_size, GPU_MEMORY_HOST, GPU_BUFFER_UPLOAD), 0u});
 
+	gpu_create_sampler
+	({
+		.mag_filter = GPU_FILTER_LINEAR,
+		.min_filter = GPU_FILTER_LINEAR,
+		.mip_filter = GPU_FILTER_LINEAR,
+		.address_mode_u = GPU_ADDRESS_MODE_REPEAT,
+		.address_mode_v = GPU_ADDRESS_MODE_REPEAT,
+		.address_mode_w = GPU_ADDRESS_MODE_REPEAT,
+		.max_anisotropy = 4.0f
+	});
 	renderer->materials.data = gpu_allocate_memory(renderer->materials.capacity * sizeof(RenderMaterialData), GPU_MEMORY_MAPPED);
+	log::debug("material buffer {:x}", gpu_host_to_device_pointer(renderer->materials.data));
 	renderer_write_material(RenderMaterialData{});
 
 	renderer_create_rendertargets();
@@ -158,27 +197,28 @@ void renderer_init(Window& wnd)
 		.depth_format = GPU_FORMAT_D32_SFLOAT
 	});
 
-	renderer->vb_visualize_cs = gpu_create_compute_pipeline(*load_shader("shaders/visbuffer_visualize"));
+	renderer->vb_resolve_cs = gpu_create_compute_pipeline(*load_shader("shaders/visbuffer_resolve"));
 }
 
 void renderer_shutdown()
 {
 	gpu_wait_idle();
 
-	gpu_destroy_pipeline(renderer->vb_visualize_cs);
+	gpu_destroy_pipeline(renderer->vb_resolve_cs);
 	gpu_destroy_pipeline(renderer->visbuffer_build_pso);
 
 	gpu_destroy_texture(renderer->framebuffer_tex);
 	gpu_destroy_texture(renderer->depthbuffer_tex);
 	gpu_destroy_texture(renderer->visbuffer_tex);
 
-	for(auto& cbv : renderer->camera_cbv)
-		gpu_free_memory(cbv);
 	gpu_free_memory(renderer->materials.data);
 
 	for(auto& chunk : renderer->stream_buffer.chunks)
 		gpu_free_memory(chunk.data);
 
+	for(auto& cbv : renderer->visbuffer_cbv)
+		gpu_free_memory(cbv);
+		
 	renderer_geometry_shutdown();
 
 	imgui_backend_shutdown();
@@ -263,7 +303,12 @@ void renderer_process_frame(double dt)
 	
 	assert(renderer->cur_swapchain);
 	assert(renderer->cur_swapchain->texture);
-
+	
+	vec2 f_res{static_cast<float>(renderer->render_resolution.x), static_cast<float>(renderer->render_resolution.y)};
+	VisbufferCBuffer* vbconst = reinterpret_cast<VisbufferCBuffer*>(gpu_map_memory(renderer->visbuffer_cbv[renderer->frame_index]));
+	vbconst->res = f_res;
+	vbconst->inv_res = vec2{1.0f / f_res.x, 1.0f / f_res.y};
+	
 	auto cmd = gpu_record_commands(GPU_QUEUE_GRAPHICS);
 	gpu_wait_signal(cmd, GPU_STAGE_RASTER_OUTPUT, renderer->swapchain_acquire[renderer->frame_index], 0);
 	gpu_texture_layout_transition(cmd, renderer->cur_swapchain, GPU_STAGE_RASTER_OUTPUT, GPU_STAGE_RASTER_OUTPUT, GPU_TEXTURE_LAYOUT_UNDEFINED, GPU_TEXTURE_LAYOUT_GENERAL);
@@ -298,18 +343,15 @@ void renderer_process_frame(double dt)
 	};
 	gpu_set_depth_stencil_state(cmd, reverse_z);
 
-	memcpy(gpu_map_memory(renderer->camera_cbv[renderer->frame_index]), &renderer->camera_matrix, sizeof(mat4));
-	gpu_write_cbuffer_descriptor(cmd, renderer->camera_cbv[renderer->frame_index]);
+	gpu_write_cbuffer_descriptor(cmd, renderer->visbuffer_cbv[renderer->frame_index]);
 
 	auto draw_data = renderer_world_get_bucket(renderer->camera_view, RENDER_BUCKET_DEFAULT);
 	
 	struct VBBuildData
 	{
-		GPUDevicePointer vertices;
 		GPUDevicePointer objects;
 		GPUDevicePointer instances;
 	} shader_data;
-	shader_data.vertices = renderer_geometry_vertex_pos_device_pointer();
 	shader_data.objects = renderer->render_world.get_objects();
 	shader_data.instances = gpu_host_to_device_pointer(draw_data.instances);
 
@@ -319,20 +361,29 @@ void renderer_process_frame(double dt)
 
 	gpu_barrier(cmd, GPU_STAGE_RASTER_OUTPUT, GPU_STAGE_COMPUTE);
 
-	gpu_set_pipeline(cmd, renderer->vb_visualize_cs);
+	for(auto& hook : renderer->visbuffer_read_hooks)
+		hook(cmd, &renderer->visbuffer, renderer->render_resolution, renderer->frame_index);
 
-	struct VBVisualizeData
+	gpu_set_pipeline(cmd, renderer->vb_resolve_cs);
+
+	gpu_write_cbuffer_descriptor(cmd, renderer->visbuffer_cbv[renderer->frame_index]);
+
+	struct VBResolveData
 	{
 		GPUDevicePointer instances;
-		uvec2 res;
+		GPUDevicePointer objects;
+		GPUDevicePointer materials;
+		GPUDevicePointer clusters;
 		uint32_t visbuffer;
 		uint32_t output;	
-	} vbv_data;
-	vbv_data.instances = shader_data.instances;
-	vbv_data.res = renderer->render_resolution;
-	vbv_data.visbuffer = renderer->visbuffer.handle;
-	vbv_data.output = renderer->framebuffer_rw.handle;
-	gpu_dispatch(cmd, &vbv_data, {(vbv_data.res.x + 7u) / 8u, (vbv_data.res.y + 7u) / 8u, 1u});
+	} vbr_data;
+	vbr_data.instances = shader_data.instances;
+	vbr_data.objects = renderer->render_world.get_objects();
+	vbr_data.materials = gpu_host_to_device_pointer(renderer->materials.data);
+	vbr_data.clusters = renderer_geometry_cluster_device_pointer();
+	vbr_data.visbuffer = renderer->visbuffer.handle;
+	vbr_data.output = renderer->framebuffer_rw.handle;
+	gpu_dispatch(cmd, &vbr_data, {(renderer->render_resolution.x + 7u) / 8u, (renderer->render_resolution.y + 7u) / 8u, 1u});
 
 	gpu_barrier(cmd, GPU_STAGE_COMPUTE, GPU_STAGE_FRAGMENT_SHADER);
 
@@ -438,10 +489,20 @@ void renderer_update_render_resolution(uvec2 res)
 	renderer->render_resolution = res;
 }
 
-void renderer_update_camera_matrices(const mat4& view, const mat4& proj)
+void renderer_update_camera(const mat4& view, const mat4& proj, float exposure)
 {
-	renderer->camera_matrix = view * proj;
+	VisbufferCBuffer* vbconst = reinterpret_cast<VisbufferCBuffer*>(gpu_map_memory(renderer->visbuffer_cbv[renderer->frame_index]));
+	vbconst->camera = view * proj;
+	vbconst->inverse_projection = mat4::inverse(proj);
+	vbconst->inverse_view = mat4::inverse(view);
+	vbconst->exposure = exposure;
+
 	renderer->render_world.update_view_camera(renderer->camera_view, view, proj);
 }
+
+void renderer_add_visbuffer_hook(visbuffer_read_hook&& hook)
+{
+	renderer->visbuffer_read_hooks.push_back(hook);
+}	
 
 }

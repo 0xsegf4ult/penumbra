@@ -1,16 +1,11 @@
 #include "globals.slang"
 #include "render_world.slang"
+#include "visbuffer_shaderdata.slang"
 
-struct Camera
-{
-	float4x4 matrix;
-};
-
-ConstantBuffer<Camera> camera;
+ConstantBuffer<VisbufferConstants> consts;
 
 struct VSInput
 {
-	Ptr<float3, Access.Read> vertex_pos;
 	Ptr<ObjectData, Access.Read> objects;
 	Ptr<ClusterInstance, Access.Read> instances;
 };
@@ -28,8 +23,8 @@ VSOutput vertexMain(uniform VSInput input, uint index : SV_VulkanVertexID, uint 
 	output.drawID = instance;
 
 	float4x4 trs = input.objects[input.instances[instance].object - 1].transform;
-	float4 outWorldPos = mul(float4(input.vertex_pos[index], 1.0), trs);
-	output.pos = mul(outWorldPos, camera.matrix);
+	float4 outWorldPos = mul(float4(consts.vertex_pos[index], 1.0), trs);
+	output.pos = mul(outWorldPos, consts.camera);
 	return output;
 }
 

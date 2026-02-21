@@ -43,6 +43,8 @@ export struct RenderBucketData
 	uint32_t max_instance_count;
 };
 
+export using visbuffer_read_hook = std::function<void(const GPUCommandBuffer&, GPUTextureDescriptor*, uvec2, uint32_t)>;
+
 export void renderer_init(Window& wnd);
 export void renderer_shutdown();
 
@@ -58,6 +60,7 @@ export RenderBucketData renderer_world_get_bucket(RenderView view, RenderBucket 
 export GPUTextureDescriptor* renderer_get_framebuffer();
 export uvec2 renderer_get_render_resolution();
 export void renderer_update_render_resolution(uvec2 res);
-export void renderer_update_camera_matrices(const mat4& view, const mat4& proj);
+export void renderer_update_camera(const mat4& view, const mat4& proj, float exposure);
+export void renderer_add_visbuffer_hook(visbuffer_read_hook&& hook); 
 
 }

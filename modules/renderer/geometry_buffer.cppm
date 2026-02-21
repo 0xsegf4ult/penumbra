@@ -217,6 +217,11 @@ export GPUDevicePointer renderer_geometry_vertex_nor_tan_device_pointer()
 	return gpu_host_to_device_pointer(state.vertex_nor_tan);
 }
 
+export GPUDevicePointer renderer_geometry_index_device_pointer()
+{
+	return gpu_host_to_device_pointer(state.indices);
+}
+
 export GPUPointer renderer_geometry_index_pointer()
 {
 	return state.indices;
