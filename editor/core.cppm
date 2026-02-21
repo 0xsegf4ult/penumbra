@@ -28,17 +28,19 @@ public:
 	{
 		imgui_add_hook([this](){draw_ui();});
 
-		widgets.push_back(std::make_unique<Viewport>(&wnd, renderer_get_framebuffer(), world));
+		create_rendertarget();
+		widgets.push_back(std::make_unique<Viewport>(&wnd, &framebuffer, world));
 		widget_viewport = reinterpret_cast<Viewport*>(widgets.back().get());
 
 		widgets.push_back(std::make_unique<ScenegraphView>(world));
 		widgets.push_back(std::make_unique<Inspector>(world));
-
+		
 		load_prefab(*world, "bistrov2");
 	}
 
 	~Editor()
 	{
+		gpu_destroy_texture(framebuffer_tex);
 	}
 
 	void fixed_update(double dt)
@@ -50,9 +52,24 @@ public:
 	{
 		auto vp_size = widget_viewport->get_size();
 		if(vp_size.x && vp_size.y)
+		{
 			renderer_update_render_resolution(vp_size);	
+
+			if(last_vp_size != vp_size)
+			{
+				last_vp_size = vp_size;
+				
+				gpu_wait_idle();
+				gpu_free_descriptor(framebuffer);
+				gpu_destroy_texture(framebuffer_tex);
+
+				create_rendertarget();
+			}
+		}
+
 		update_main_camera();
-		widget_viewport->update_render_target(renderer_get_framebuffer());
+		widget_viewport->update_render_target(&framebuffer);
+		renderer_set_output_rendertarget(framebuffer_tex);
 	}
 
 	void draw_ui()
@@ -88,6 +105,21 @@ public:
 		ImGui::End();
 	}
 private:
+	void create_rendertarget()
+	{
+		framebuffer_tex = gpu_create_texture
+		({
+			.dim = uvec3{last_vp_size, 1u},
+			.format = GPU_FORMAT_RGBA8_SRGB,
+		       	.usage = GPU_TEXTURE_SAMPLED | GPU_TEXTURE_COLOR_ATTACHMENT	
+		});
+		framebuffer = gpu_texture_view_descriptor(framebuffer_tex, {.format = GPU_FORMAT_RGBA8_SRGB});
+
+		auto cmd = gpu_record_commands(GPU_QUEUE_GRAPHICS);
+		gpu_texture_layout_transition(cmd, framebuffer_tex, GPU_STAGE_NONE, GPU_STAGE_RASTER_OUTPUT, GPU_TEXTURE_LAYOUT_UNDEFINED, GPU_TEXTURE_LAYOUT_GENERAL);
+		gpu_submit(GPU_QUEUE_GRAPHICS, cmd);
+	}
+
 	void update_main_camera()
 	{
 		auto& camera_transform = world->entities.get<Transform>(world->main_camera);
@@ -186,6 +218,10 @@ private:
 	WorldState* world;
 	std::vector<std::unique_ptr<Widget>> widgets;
 	Viewport* widget_viewport;
+
+	uvec2 last_vp_size{800u, 600u};
+	GPUTexture framebuffer_tex;
+	GPUTextureDescriptor framebuffer;
 };
 
 }

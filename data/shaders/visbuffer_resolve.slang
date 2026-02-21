@@ -49,17 +49,6 @@ float3 calculate_direct_lighting(float3 N, float3 V, float NdotV, float3 diffuse
 	return l0;
 } 
 
-float3 applyACES(float3 color)
-{
-	const float a = 2.51f;
-	const float b = 0.03f;
-	const float c = 2.43f;
-	const float d = 0.59f;
-	const float e = 0.14f;
-
-	return saturate((color * (a * color + b)) / (color * (c * color + d) + e));
-}
-
 [shader("compute")]
 [numthreads(8, 8, 1)]
 void computeMain(uint groupIndex : SV_GroupIndex, uint2 Gid : SV_GroupID, uniform CSInput input)
@@ -170,6 +159,7 @@ void computeMain(uint groupIndex : SV_GroupIndex, uint2 Gid : SV_GroupID, unifor
 	
 	float NdotV = dot(N, V);
 	N += (2.0 * saturate(-NdotV)) * V;
+
 	NdotV = dot(N, V);
 
 	float3 l0 = float3(0.0);
@@ -184,7 +174,7 @@ void computeMain(uint groupIndex : SV_GroupIndex, uint2 Gid : SV_GroupID, unifor
 
 	float3 ambient = float3(0.005);
 	float3 hdr = float3(ambient + l0 + emissive) * consts.exposure;
-	input.framebuffer.desc[pixel] = float4(applyACES(hdr), 1.0); 
+	input.framebuffer.desc[pixel] = float4(hdr, 1.0); 
 
 	}
 }

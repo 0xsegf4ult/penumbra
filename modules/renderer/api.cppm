@@ -65,7 +65,7 @@ export void renderer_write_material(const RenderMaterialData& data);
 export GPUDevicePointer renderer_materials_device_pointer();
 export RenderObject renderer_world_insert_object(const RenderObjectDescription& data);
 export RenderBucketData renderer_world_get_bucket(RenderView view, RenderBucket bucket);
-export GPUTextureDescriptor* renderer_get_framebuffer();
+export void renderer_set_output_rendertarget(GPUTexture rt);
 export uvec2 renderer_get_render_resolution();
 export void renderer_update_render_resolution(uvec2 res);
 export void renderer_update_camera(const mat4& view, const mat4& proj, float exposure);

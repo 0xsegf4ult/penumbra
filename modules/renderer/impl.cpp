@@ -85,15 +85,17 @@ struct renderer_context_t
 
 	GPUTexture visbuffer_tex;
 	GPUTexture depthbuffer_tex;
-	GPUTexture framebuffer_tex;
+	GPUTexture hdrbuffer_tex;
 	GPUTextureDescriptor visbuffer;
 	GPUTextureDescriptor depthbuffer;
-	GPUTextureDescriptor framebuffer;
-	GPUTextureDescriptor framebuffer_rw;
+	GPUTextureDescriptor hdrbuffer;
+	GPUTextureDescriptor hdrbuffer_rw;
+	GPUTexture output_rt{0u}; 
 
 	GPUPipeline visbuffer_build_pso;
 	GPUPipeline visbuffer_build_alphamask_pso;
 	GPUPipeline vb_resolve_cs;
+	GPUPipeline hdr_compose_pso;
 
 	std::vector<visbuffer_read_hook> visbuffer_read_hooks;
 };
@@ -118,19 +120,19 @@ void renderer_create_rendertargets()
 	});
 	renderer->depthbuffer = gpu_texture_view_descriptor(renderer->depthbuffer_tex, {.format = GPU_FORMAT_D32_SFLOAT});
 
-	renderer->framebuffer_tex = gpu_create_texture
+	renderer->hdrbuffer_tex = gpu_create_texture
 	({
 		.dim = uvec3{renderer->render_resolution, 1u},
-		.format = GPU_FORMAT_RGBA8_UNORM,
+		.format = GPU_FORMAT_B10GR11_UFLOAT,
 		.usage = GPU_TEXTURE_SAMPLED | GPU_TEXTURE_STORAGE
 	});
-	renderer->framebuffer_rw = gpu_rwtexture_view_descriptor(renderer->framebuffer_tex, {.format = GPU_FORMAT_RGBA8_UNORM});
-	renderer->framebuffer = gpu_texture_view_descriptor(renderer->framebuffer_tex, {.format = GPU_FORMAT_RGBA8_UNORM});
+	renderer->hdrbuffer = gpu_texture_view_descriptor(renderer->hdrbuffer_tex, {.format = GPU_FORMAT_B10GR11_UFLOAT});
+	renderer->hdrbuffer_rw = gpu_rwtexture_view_descriptor(renderer->hdrbuffer_tex, {.format = GPU_FORMAT_B10GR11_UFLOAT});
 
 	auto cmd = gpu_record_commands(GPU_QUEUE_GRAPHICS);
 	gpu_texture_layout_transition(cmd, renderer->visbuffer_tex, GPU_STAGE_NONE, GPU_STAGE_RASTER_OUTPUT, GPU_TEXTURE_LAYOUT_UNDEFINED, GPU_TEXTURE_LAYOUT_GENERAL);
 	gpu_texture_layout_transition(cmd, renderer->depthbuffer_tex, GPU_STAGE_NONE, GPU_STAGE_RASTER_OUTPUT, GPU_TEXTURE_LAYOUT_UNDEFINED, GPU_TEXTURE_LAYOUT_GENERAL);
-	gpu_texture_layout_transition(cmd, renderer->framebuffer_tex, GPU_STAGE_NONE, GPU_STAGE_COMPUTE, GPU_TEXTURE_LAYOUT_UNDEFINED, GPU_TEXTURE_LAYOUT_GENERAL);
+	gpu_texture_layout_transition(cmd, renderer->hdrbuffer_tex, GPU_STAGE_NONE, GPU_STAGE_COMPUTE, GPU_TEXTURE_LAYOUT_UNDEFINED, GPU_TEXTURE_LAYOUT_GENERAL);
 	gpu_submit(GPU_QUEUE_GRAPHICS, cmd);
 }
 
@@ -205,17 +207,23 @@ void renderer_init(Window& wnd)
 	});
 
 	renderer->vb_resolve_cs = gpu_create_compute_pipeline(load_shader("shaders/visbuffer_resolve"));
+
+	renderer->hdr_compose_pso = gpu_create_graphics_pipeline(load_shader("shaders/hdr_compose"),
+	{
+		.color_targets = {GPU_FORMAT_RGBA8_SRGB}
+	});
 }
 
 void renderer_shutdown()
 {
 	gpu_wait_idle();
 
+	gpu_destroy_pipeline(renderer->hdr_compose_pso);
 	gpu_destroy_pipeline(renderer->vb_resolve_cs);
 	gpu_destroy_pipeline(renderer->visbuffer_build_alphamask_pso);
 	gpu_destroy_pipeline(renderer->visbuffer_build_pso);
 
-	gpu_destroy_texture(renderer->framebuffer_tex);
+	gpu_destroy_texture(renderer->hdrbuffer_tex);
 	gpu_destroy_texture(renderer->depthbuffer_tex);
 	gpu_destroy_texture(renderer->visbuffer_tex);
 
@@ -253,11 +261,12 @@ void renderer_next_frame()
 		renderer->last_render_resolution = renderer->render_resolution;
 		gpu_wait_queue(GPU_QUEUE_GRAPHICS, renderer->gfx_queue_frames[renderer->frame_index]);
 
-		gpu_destroy_texture(renderer->framebuffer_tex);
+		gpu_destroy_texture(renderer->hdrbuffer_tex);
 		gpu_destroy_texture(renderer->depthbuffer_tex);
 		gpu_destroy_texture(renderer->visbuffer_tex);
 
-		gpu_free_descriptor(renderer->framebuffer);
+		gpu_free_descriptor(renderer->hdrbuffer_rw);
+		gpu_free_descriptor(renderer->hdrbuffer);
 		gpu_free_descriptor(renderer->depthbuffer);
 		gpu_free_descriptor(renderer->visbuffer);
 
@@ -419,10 +428,38 @@ void renderer_process_frame(double dt)
 	vbr_data.materials = gpu_host_to_device_pointer(renderer->materials.data);
 	vbr_data.clusters = renderer_geometry_cluster_device_pointer();
 	vbr_data.visbuffer = renderer->visbuffer.handle;
-	vbr_data.output = renderer->framebuffer_rw.handle;
+	vbr_data.output = renderer->hdrbuffer_rw.handle;
 	gpu_dispatch(cmd, &vbr_data, {(renderer->render_resolution.x + 7u) / 8u, (renderer->render_resolution.y + 7u) / 8u, 1u});
 
 	gpu_barrier(cmd, GPU_STAGE_COMPUTE, GPU_STAGE_FRAGMENT_SHADER);
+
+	struct HDRComposeData
+	{
+		uint32_t hdrbuffer_handle;
+	} compose_data;
+	compose_data.hdrbuffer_handle = renderer->hdrbuffer.handle;
+
+	if(renderer->output_rt)
+	{
+		gpu_begin_renderpass(cmd,
+		{
+			.color_targets =
+			{
+				{
+				.texture = renderer->output_rt,
+				.load_op = GPU_LOAD_OP_DONTCARE
+				}
+			}
+		});
+
+		gpu_set_pipeline(cmd, renderer->hdr_compose_pso);
+
+		gpu_draw(cmd, &compose_data, 3, 1, 0, 0);
+
+		gpu_end_renderpass(cmd);
+
+		gpu_barrier(cmd, GPU_STAGE_RASTER_OUTPUT, GPU_STAGE_FRAGMENT_SHADER);
+	}
 
 	gpu_begin_renderpass(cmd,
 	{
@@ -434,6 +471,12 @@ void renderer_process_frame(double dt)
 			}
 		}
 	});
+
+	if(!renderer->output_rt)
+	{
+		gpu_set_pipeline(cmd, renderer->hdr_compose_pso);
+		gpu_draw(cmd, &compose_data, 3, 1, 0, 0);
+	}
 
 	imgui_backend_render(cmd, dt);
 
@@ -511,9 +554,9 @@ RenderBucketData renderer_world_get_bucket(RenderView view, RenderBucket bucket)
 	return renderer->render_world.get_bucket(view, bucket);
 }
 
-GPUTextureDescriptor* renderer_get_framebuffer()
+void renderer_set_output_rendertarget(GPUTexture rt)
 {
-	return &renderer->framebuffer;
+	renderer->output_rt = rt;
 }
 
 uvec2 renderer_get_render_resolution()
