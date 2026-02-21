@@ -43,7 +43,15 @@ export struct RenderBucketData
 	uint32_t max_instance_count;
 };
 
-export using visbuffer_read_hook = std::function<void(const GPUCommandBuffer&, GPUTextureDescriptor*, uvec2, uint32_t)>;
+export struct VisbufferInfo
+{
+	GPUTextureDescriptor* texture;
+	GPUDevicePointer instances;
+	GPUDevicePointer objects;
+	uvec2 resolution;
+};
+
+export using visbuffer_read_hook = std::function<void(GPUCommandBuffer&, VisbufferInfo, uint32_t)>;
 
 export void renderer_init(Window& wnd);
 export void renderer_shutdown();

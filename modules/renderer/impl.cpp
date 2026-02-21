@@ -362,7 +362,7 @@ void renderer_process_frame(double dt)
 	gpu_barrier(cmd, GPU_STAGE_RASTER_OUTPUT, GPU_STAGE_COMPUTE);
 
 	for(auto& hook : renderer->visbuffer_read_hooks)
-		hook(cmd, &renderer->visbuffer, renderer->render_resolution, renderer->frame_index);
+		hook(cmd, {&renderer->visbuffer, shader_data.instances, shader_data.objects, renderer->render_resolution}, renderer->frame_index);
 
 	gpu_set_pipeline(cmd, renderer->vb_resolve_cs);
 

@@ -29,11 +29,10 @@ public:
 		imgui_add_hook([this](){draw_ui();});
 
 		widgets.push_back(std::make_unique<Viewport>(&wnd, renderer_get_framebuffer(), world));
-		widget_viewport = widgets.back().get();
+		widget_viewport = reinterpret_cast<Viewport*>(widgets.back().get());
 
 		widgets.push_back(std::make_unique<ScenegraphView>(world));
 		widgets.push_back(std::make_unique<Inspector>(world));
-
 
 		load_prefab(*world, "bistrov2");
 	}
@@ -53,6 +52,7 @@ public:
 		if(vp_size.x && vp_size.y)
 			renderer_update_render_resolution(vp_size);	
 		update_main_camera();
+		widget_viewport->update_render_target(renderer_get_framebuffer());
 	}
 
 	void draw_ui()
@@ -116,6 +116,7 @@ private:
 
 
 		renderer_update_camera(view, proj, camera.get_exposure());
+		widget_viewport->update_camera(view, proj);
 	}
 
 
@@ -180,10 +181,11 @@ private:
 		}
 	}
 
+
 	Window& window;
 	WorldState* world;
 	std::vector<std::unique_ptr<Widget>> widgets;
-	Widget* widget_viewport;
+	Viewport* widget_viewport;
 };
 
 }
