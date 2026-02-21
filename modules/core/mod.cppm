@@ -2,6 +2,7 @@ export module penumbra.core;
 export import :array_proxy;
 export import :config;
 export import :hash;
+export import :input_keys;
 export import :log;
 export import :panic;
 export import :strongly_typed;

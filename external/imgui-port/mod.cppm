@@ -23,6 +23,7 @@ export namespace ImGui
 	using ImGui::IsItemDeactivatedAfterEdit;
 	using ImGui::IsMouseDown;
 	using ImGui::IsMouseReleased;
+	using ImGui::IsKeyDown;
 	using ImGui::GetWindowWidth;
 	using ImGui::GetWindowHeight;
 	using ImGui::SetNextWindowSize;

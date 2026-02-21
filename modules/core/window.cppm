@@ -13,6 +13,7 @@ module;
 export module penumbra.core:window;
 import penumbra.math;
 import :log;
+import :input_keys;
 
 import std;
 
@@ -65,6 +66,7 @@ enum class input_mouse_button
 	side2 = 5
 };
 
+using key_event_callback = std::function<void(KeyboardScancode, bool)>;
 using text_event_callback = std::function<void(const char*)>;
 using mouse_button_event_callback = std::function<void(input_mouse_button, bool)>;
 using mouse_move_event_callback = std::function<void(float x, float y, float dx, float dy)>;
@@ -73,7 +75,11 @@ using mouse_wheel_event_callback = std::function<void(float x, float y)>;
 class Window
 {
 public:
-	Window(SDL_Window* wnd, uvec2 wnd_size) : handle{wnd}, size{wnd_size} {}
+	Window(SDL_Window* wnd, uvec2 wnd_size) : handle{wnd}, size{wnd_size} 
+	{
+		key_states = SDL_GetKeyboardState(nullptr);
+	}
+
 	~Window()
 	{
 		if(handle)
@@ -111,6 +117,13 @@ public:
 			{
 				size.w = static_cast<uint32_t>(event.window.data1);
 				size.h = static_cast<uint32_t>(event.window.data2);
+				break;
+			}
+			case SDL_EVENT_KEY_DOWN:
+			case SDL_EVENT_KEY_UP:
+			{
+				for(auto& callback: key_event_listeners)
+					callback(sdl_scancode_parse(event.key.scancode), event.type == SDL_EVENT_KEY_DOWN);
 				break;
 			}
 			case SDL_EVENT_TEXT_INPUT:
@@ -156,6 +169,14 @@ public:
 		return mouse_delta;
 	}
 
+	bool is_key_down(KeyboardScancode scancode) const
+	{
+		if(scancode >= SCANCODE_COUNT)
+			return false;
+
+		return key_states[scancode_to_sdl(scancode)];
+	}
+
 	SDL_Window* native_handle() const
 	{
 		return handle;
@@ -174,6 +195,11 @@ public:
 	void set_fullscreen(bool state)
 	{
 		SDL_SetWindowFullscreen(handle, state);
+	}
+
+	void register_key_event_listener(key_event_callback callback)
+	{
+		key_event_listeners.push_back(callback);
 	}
 
         void register_text_event_listener(text_event_callback callback)
@@ -218,7 +244,9 @@ private:
 	
 	vec2 mouse_pos{0.0f};
 	vec2 mouse_delta{0.0f};
+	const bool* key_states{nullptr};
 
+	std::vector<key_event_callback> key_event_listeners;
 	std::vector<text_event_callback> text_event_listeners;
         std::vector<mouse_button_event_callback> mouse_button_event_listeners;
         std::vector<mouse_move_event_callback> mouse_move_event_listeners;
