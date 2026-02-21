@@ -28,6 +28,7 @@ target_sources(penumbra_core PUBLIC FILE_SET CXX_MODULES FILES
 	config.cppm
 	hash.cppm
 	log.cppm
+	panic.cppm
 	strongly_typed.cppm
 	vfs.cppm
 	window.cppm

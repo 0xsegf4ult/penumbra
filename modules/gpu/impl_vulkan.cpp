@@ -117,6 +117,8 @@ constexpr VkFormat format_to_vk(GPUFormat fmt)
 		return VK_FORMAT_R32_UINT;
 	case GPU_FORMAT_B10GR11_UFLOAT:
 		return VK_FORMAT_B10G11R11_UFLOAT_PACK32;
+	case GPU_FORMAT_BC4_UNORM:
+		return VK_FORMAT_BC4_UNORM_BLOCK;
 	case GPU_FORMAT_BC5_UNORM:
 		return VK_FORMAT_BC5_UNORM_BLOCK;
 	case GPU_FORMAT_BC6H_UFLOAT:
@@ -175,6 +177,51 @@ constexpr VkImageUsageFlags image_usage_to_vk(GPUTextureUsage usage)
 		res |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
 
 	return res;
+}
+
+constexpr uint32_t format_blockdim(GPUFormat fmt)
+{
+	switch(fmt)
+	{
+	case GPU_FORMAT_BC5_UNORM:
+	case GPU_FORMAT_BC6H_UFLOAT:
+	case GPU_FORMAT_BC7_UNORM:
+	case GPU_FORMAT_BC7_SRGB:
+		return 4u;
+	default:
+		return 1u;
+	}
+}
+
+constexpr uint32_t format_blocksize(GPUFormat fmt)
+{
+	switch(fmt)
+	{
+	case GPU_FORMAT_BC5_UNORM:
+	case GPU_FORMAT_BC6H_UFLOAT:
+	case GPU_FORMAT_BC7_UNORM:
+	case GPU_FORMAT_BC7_SRGB:
+		return 16u;
+	case GPU_FORMAT_R32_UINT:
+	case GPU_FORMAT_RGBA8_SRGB:
+	case GPU_FORMAT_RGBA8_UNORM:
+	case GPU_FORMAT_BGRA8_SRGB:
+	case GPU_FORMAT_B10GR11_UFLOAT:
+		return 4u;
+	case GPU_FORMAT_RG8_UNORM:
+		return 2u;
+	default:
+		return 1u;
+	}
+}
+
+constexpr uint32_t size_for_image(uint32_t w, uint32_t h, uint32_t d, GPUFormat fmt)
+{
+	auto bdim = format_blockdim(fmt);
+	auto wb = std::max(w / bdim, 1u);
+	auto hb = std::max(h / bdim, 1u);
+	auto db = std::max(d / bdim, 1u);
+	return wb * hb * db * format_blocksize(fmt);
 }
 
 constexpr VkFilter filter_to_vk(GPUFilter filter)
@@ -587,6 +634,7 @@ struct gpu_context_t
 
 	std::array<QueueData, 3> queue_data;
 
+	std::vector<VkSemaphore> semaphores;
 	std::vector<GPUBuffer> buffers;
 	std::vector<GPUTextureData> textures;
 	std::vector<VkSampler> samplers;
@@ -610,6 +658,8 @@ struct gpu_context_t
 	std::vector<GPUTexture> swapchain_textures;
 	uint32_t current_swapchain_index;
 	bool swapchain_dirty;
+
+	GPUProperties props;
 };
 
 gpu_context_t* gpu_context = nullptr;
@@ -781,6 +831,7 @@ bool vulkan_create_device(std::span<VkPhysicalDevice> phys_devices, int index = 
 	vkGetPhysicalDeviceProperties2(gpu_context->phys_device, &props);
 
 	log::info("gpu_vulkan: selected render device {}", std::string_view{props.properties.deviceName});
+	gpu_context->props.device_name = std::string_view{props.properties.deviceName};
 	auto queue_ci = vulkan_device_create_queues();
 
 	VkPhysicalDeviceExtendedDynamicState3FeaturesEXT ds3ext
@@ -829,6 +880,8 @@ bool vulkan_create_device(std::span<VkPhysicalDevice> phys_devices, int index = 
 		.pNext = &chain_vk13,
 		.drawIndirectCount = true,
 		.storageBuffer8BitAccess = true,
+		.uniformAndStorageBuffer8BitAccess = true, // FIXME: slang bug
+		.storagePushConstant8 = true, // FIXME: slang bug
 		.shaderInt8 = true,
 		.shaderSampledImageArrayNonUniformIndexing = true,
 		.shaderStorageImageArrayNonUniformIndexing = true,
@@ -1675,7 +1728,7 @@ uint64_t gpu_submit(GPUQueue queue, GPUCommandBuffer& cmd)
 		{
 			.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
 			.pNext = nullptr,
-			.semaphore = std::bit_cast<VkSemaphore>(cmd.wait_signal.object),
+			.semaphore = gpu_context->semaphores[cmd.wait_signal.object - 1],
 			.value = cmd.wait_signal.value,
 			.stageMask = gpu_stage_to_vk(cmd.wait_signal.stage),
 			.deviceIndex = 0
@@ -1689,7 +1742,7 @@ uint64_t gpu_submit(GPUQueue queue, GPUCommandBuffer& cmd)
 		{
 			.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
 			.pNext = nullptr,
-			.semaphore = std::bit_cast<VkSemaphore>(cmd.emit_signal.object),
+			.semaphore = gpu_context->semaphores[cmd.emit_signal.object - 1],
 			.value = cmd.emit_signal.value,
 			.stageMask = gpu_stage_to_vk(cmd.emit_signal.stage),
 			.deviceIndex = 0
@@ -1719,7 +1772,7 @@ uint64_t gpu_submit(GPUQueue queue, GPUCommandBuffer& cmd)
 
 	if(vkQueueSubmit2(qd.handle, 1u, &batch, nullptr) != VK_SUCCESS)
 	{
-		log::error("gpu_vulkan: failed to submit command buffers");
+		panic("gpu_vulkan: failed to submit command buffer");
 	}
 
 	qd.cmd_pools[cmd.thread].buffers.push({cbuf, qd.timeline});
@@ -1780,23 +1833,23 @@ GPUSemaphore gpu_create_semaphore(uint64_t initial_value, GPUSemaphoreType type)
 
 	VkSemaphore sem;
 	vkCreateSemaphore(gpu_context->device, &sem_ci, nullptr, &sem);
-	return {std::bit_cast<uint64_t>(sem), initial_value};
+	gpu_context->semaphores.push_back(sem);
+	return GPUSemaphore{static_cast<uint32_t>(gpu_context->semaphores.size())};
 }
 
-void gpu_destroy_semaphore(GPUSemaphore& sem)
+void gpu_destroy_semaphore(GPUSemaphore sem)
 {
-	vkDestroySemaphore(gpu_context->device, std::bit_cast<VkSemaphore>(sem.handle), nullptr);
+	assert(sem);
+	vkDestroySemaphore(gpu_context->device, gpu_context->semaphores[sem - 1], nullptr);
 }
 
-GPUSemaphore gpu_get_queue_timeline(GPUQueue queue)
+uint64_t gpu_semaphore_read_counter(GPUSemaphore sem)
 {
-	assert(queue > GPU_QUEUE_INVALID);
-
-	return
-	{
-		std::bit_cast<uint64_t>(gpu_context->queue_data[queue - 1].semaphore),
-		gpu_context->queue_data[queue - 1].timeline
-	};
+	assert(sem);
+	
+	uint64_t val = 0;
+	vkGetSemaphoreCounterValue(gpu_context->device, gpu_context->semaphores[sem - 1], &val);
+	return val;
 }
 
 VkDescriptorSetLayout shader_create_push_descriptor_set(const ShaderIR::CBufferInfo& info)
@@ -2144,7 +2197,7 @@ void gpu_mem_clear(const GPUCommandBuffer& cmd, const GPUPointer& dst, size_t si
 	vkCmdFillBuffer(std::bit_cast<VkCommandBuffer>(cmd.handle), dst_buffer.handle, dst.offset, size, 0);
 }
 
-void gpu_copy_to_texture(const GPUCommandBuffer& cmd, const GPUPointer& src, GPUTexture dst)
+void gpu_copy_to_texture(const GPUCommandBuffer& cmd, const GPUPointer& src, GPUTexture dst, uint32_t mips)
 {
 	assert(src.handle);
 	auto& buffer = gpu_context->buffers[src.handle - 1];
@@ -2165,15 +2218,27 @@ void gpu_copy_to_texture(const GPUCommandBuffer& cmd, const GPUPointer& src, GPU
 		.imageExtent = {texture.size.x, texture.size.y, texture.size.z}
 	};
 
-	vkCmdCopyBufferToImage
-	(
-		std::bit_cast<VkCommandBuffer>(cmd.handle),
-		buffer.handle,
-		texture.handle,
-		VK_IMAGE_LAYOUT_GENERAL,
-		1u,
-		&region
-	);
+	for(uint32_t i = 0; i < mips; i++)
+	{
+		if(i > 0)
+		{
+			region.bufferOffset += size_for_image(region.imageExtent.width, region.imageExtent.height, region.imageExtent.depth, texture.format);
+			region.imageSubresource.mipLevel = i;
+			region.imageExtent.width = region.imageExtent.width > 1 ? region.imageExtent.width / 2 : 1u;
+			region.imageExtent.height = region.imageExtent.height > 1 ? region.imageExtent.height / 2 : 1u;
+			region.imageExtent.depth = region.imageExtent.depth > 1 ? region.imageExtent.depth / 2 : 1u;
+		}
+
+		vkCmdCopyBufferToImage
+		(
+			std::bit_cast<VkCommandBuffer>(cmd.handle),
+			buffer.handle,
+			texture.handle,
+			VK_IMAGE_LAYOUT_GENERAL,
+			1u,
+			&region
+		);
+	}
 }
 
 void gpu_copy_from_texture(const GPUCommandBuffer& cmd, GPUTexture src, const GPUPointer& dst)
@@ -2195,7 +2260,7 @@ void gpu_barrier(const GPUCommandBuffer& cmd, GPUStage src, GPUStage dst, GPUHaz
 	if(hazards == GPU_HAZARD_NONE)
 	{
 		barrier.srcAccessMask = VK_ACCESS_2_MEMORY_WRITE_BIT;
-		barrier.dstAccessMask = VK_ACCESS_2_MEMORY_READ_BIT;
+		barrier.dstAccessMask = VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT;
 	}
 
 	if(hazards & GPU_HAZARD_INDIRECT_ARGS)
@@ -2284,23 +2349,24 @@ void gpu_texture_layout_transition(const GPUCommandBuffer& cmd, GPUTexture tex, 
 	vkCmdPipelineBarrier2(std::bit_cast<VkCommandBuffer>(cmd.handle), &dep);
 }
 
-void gpu_wait_signal(GPUCommandBuffer& cmd, GPUStage dst_stage, GPUSemaphore& sem, uint64_t timeline)
+void gpu_wait_signal(GPUCommandBuffer& cmd, GPUStage dst_stage, GPUSemaphore sem, uint64_t timeline)
 {
 	assert(!cmd.wait_signal.handle && "Command buffer already waiting on signal");
 	cmd.wait_signal =
 	{
-		std::bit_cast<uint64_t>(sem.handle),
+		sem,
 		timeline,
 		dst_stage
 	};
 }
 
-void gpu_emit_signal(GPUCommandBuffer& cmd, GPUStage src_stage, GPUSemaphore& sem, uint64_t timeline)
+void gpu_emit_signal(GPUCommandBuffer& cmd, GPUStage src_stage, GPUSemaphore sem, uint64_t timeline)
 {
+	assert(sem);
 	assert(!cmd.emit_signal.handle && "Command buffer already emitting signal");
 	cmd.emit_signal =
 	{
-		std::bit_cast<uint64_t>(sem.handle),
+		sem,
 		timeline, 
 		src_stage
 	};
@@ -2700,8 +2766,8 @@ void gpu_swapchain_init(Window& wnd)
 {
 	if(!SDL_Vulkan_CreateSurface(wnd.native_handle(), gpu_context->instance, nullptr, &gpu_context->swapchain_surface))
 	{
-		log::error("gpu_vulkan: failed to create surface: {}", SDL_GetError());
-		return;
+		auto msg = std::format("gpu_vulkan: failed to create surface: {}", SDL_GetError());
+		panic(msg.c_str());
 	}
 
 	gpu_context->swapchain_pmode = VK_PRESENT_MODE_IMMEDIATE_KHR; 
@@ -2709,14 +2775,15 @@ void gpu_swapchain_init(Window& wnd)
 	gpu_context->swapchain_dirty = false;
 }
 
-GPUTexture gpu_swapchain_acquire_next(GPUSemaphore& sem)
+GPUTexture gpu_swapchain_acquire_next(GPUSemaphore sem)
 {
+	assert(sem);
 	ZoneScoped;
 	uint32_t image_index{0};
 	
 	do
 	{
-		auto result = vkAcquireNextImageKHR(gpu_context->device, gpu_context->swapchain, 1000000, std::bit_cast<VkSemaphore>(sem.handle), nullptr, &image_index);
+		auto result = vkAcquireNextImageKHR(gpu_context->device, gpu_context->swapchain, 1000000, gpu_context->semaphores[sem - 1], nullptr, &image_index);
 	
 		if(result == VK_SUCCESS)
 		{
@@ -2740,11 +2807,12 @@ GPUTexture gpu_swapchain_acquire_next(GPUSemaphore& sem)
 	return gpu_context->swapchain_textures[image_index];
 }
 
-void gpu_swapchain_present(GPUQueue queue, GPUSemaphore& sem)
+void gpu_swapchain_present(GPUQueue queue, GPUSemaphore sem)
 {
 	ZoneScoped;
 	assert(queue > GPU_QUEUE_INVALID);
-	VkSemaphore present_sem = std::bit_cast<VkSemaphore>(sem.handle);
+	assert(sem);
+	VkSemaphore present_sem = gpu_context->semaphores[sem - 1];
 
 	VkPresentInfoKHR present_info
 	{
@@ -2784,5 +2852,9 @@ bool gpu_swapchain_set_present_mode(GPUPresentMode mode)
 	return true;
 }
 
+const GPUProperties& gpu_get_properties()
+{
+	return gpu_context->props;
+}
 
 }

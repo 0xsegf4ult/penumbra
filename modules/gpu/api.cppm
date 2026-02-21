@@ -16,8 +16,8 @@ enum GPUBufferUsage { GPU_BUFFER_INVALID, GPU_BUFFER_STORAGE, GPU_BUFFER_UNIFORM
 enum GPUTextureType { GPU_TEXTURE_1D, GPU_TEXTURE_2D, GPU_TEXTURE_3D, GPU_TEXTURE_CUBE, GPU_TEXTURE_2D_ARRAY };
 enum GPUFormat { GPU_FORMAT_UNDEFINED, GPU_FORMAT_R8_UNORM, GPU_FORMAT_RG8_UNORM, GPU_FORMAT_RGBA8_UNORM,
 		GPU_FORMAT_RGBA8_SRGB, GPU_FORMAT_BGRA8_SRGB, GPU_FORMAT_D16_UNORM, GPU_FORMAT_D32_SFLOAT, 
-		GPU_FORMAT_R32_UINT, GPU_FORMAT_B10GR11_UFLOAT, GPU_FORMAT_BC5_UNORM, GPU_FORMAT_BC6H_UFLOAT, 
-		GPU_FORMAT_BC7_UNORM, GPU_FORMAT_BC7_SRGB };
+		GPU_FORMAT_R32_UINT, GPU_FORMAT_B10GR11_UFLOAT, GPU_FORMAT_BC4_UNORM, GPU_FORMAT_BC5_UNORM, 
+		GPU_FORMAT_BC6H_UFLOAT, GPU_FORMAT_BC7_UNORM, GPU_FORMAT_BC7_SRGB };
 enum GPUTextureLayout { GPU_TEXTURE_LAYOUT_UNDEFINED, GPU_TEXTURE_LAYOUT_GENERAL, GPU_TEXTURE_LAYOUT_PRESENT };
 enum GPUFilter { GPU_FILTER_NEAREST, GPU_FILTER_LINEAR };
 enum GPUAddressMode { GPU_ADDRESS_MODE_REPEAT, GPU_ADDRESS_MODE_MIRRORED_REPEAT, GPU_ADDRESS_MODE_CLAMP_TO_EDGE };
@@ -86,6 +86,7 @@ constexpr uint16_t GPU_ALL_LAYERS = ~0u;
 using GPUDevicePointer = uint64_t;
 using GPUTexture = strongly_typed<uint32_t, struct _gpu_texture_tag>;
 using GPUSampler = strongly_typed<uint32_t, struct _gpu_sampler_tag>;
+using GPUSemaphore = strongly_typed<uint32_t, struct _gpu_semaphore_tag>;
 
 struct GPUPointer
 {
@@ -190,19 +191,13 @@ struct GPUCommandBuffer
 
 	struct CB_Signal
 	{
-		uint64_t object{0};
+		GPUSemaphore object{0u};
 		uint64_t value{0};
 		GPUStage stage{};
 	};
 
 	CB_Signal wait_signal{};
 	CB_Signal emit_signal{};	
-};
-
-struct GPUSemaphore
-{
-	uint64_t handle;
-	uint64_t value;
 };
 
 struct GPURenderTarget
@@ -230,6 +225,11 @@ struct GPUIndirectCommand
 	uint32_t instance_id;
 };
 
+struct GPUProperties
+{
+	std::string_view device_name;
+};
+
 bool gpu_init();
 void gpu_shutdown();
 
@@ -255,18 +255,18 @@ bool gpu_wait_queue(GPUQueue queue, uint64_t timeline);
 void gpu_wait_idle();
 
 GPUSemaphore gpu_create_semaphore(uint64_t initial_value, GPUSemaphoreType type = GPU_SEMAPHORE_TIMELINE);
-void gpu_destroy_semaphore(GPUSemaphore& sem);
-GPUSemaphore gpu_get_queue_timeline(GPUQueue queue);
+void gpu_destroy_semaphore(GPUSemaphore sem);
+uint64_t gpu_semaphore_read_counter(GPUSemaphore semaphore);
 
 void gpu_mem_copy(const GPUCommandBuffer& cmd, const GPUPointer& src, const GPUPointer& dst, size_t size);
 void gpu_mem_clear(const GPUCommandBuffer& cmd, const GPUPointer& dst, size_t size);
-void gpu_copy_to_texture(const GPUCommandBuffer& cmd, const GPUPointer& src, GPUTexture dst);
+void gpu_copy_to_texture(const GPUCommandBuffer& cmd, const GPUPointer& src, GPUTexture dst, uint32_t mips = 1);
 void gpu_copy_from_texture(const GPUCommandBuffer& cmd, GPUTexture src, const GPUPointer& dst);
 
 void gpu_barrier(const GPUCommandBuffer& cmd, GPUStage src, GPUStage dst, GPUHazard hazards = GPU_HAZARD_NONE);
 void gpu_texture_layout_transition(const GPUCommandBuffer& cmd, GPUTexture tex, GPUStage src_stage, GPUStage dst_stage, GPUTextureLayout src_layout, GPUTextureLayout dst_layout, GPUQueue src_queue = GPU_QUEUE_INVALID, GPUQueue dst_queue = GPU_QUEUE_INVALID);
-void gpu_wait_signal(GPUCommandBuffer& cmd, GPUStage dst_stage, GPUSemaphore& sem, uint64_t timeline);
-void gpu_emit_signal(GPUCommandBuffer& cmd, GPUStage src_stage, GPUSemaphore& sem, uint64_t timeline);
+void gpu_wait_signal(GPUCommandBuffer& cmd, GPUStage dst_stage, GPUSemaphore sem, uint64_t timeline);
+void gpu_emit_signal(GPUCommandBuffer& cmd, GPUStage src_stage, GPUSemaphore sem, uint64_t timeline);
 
 void gpu_set_pipeline(GPUCommandBuffer& cmd, GPUPipeline& pipe);
 void gpu_set_depth_stencil_state(const GPUCommandBuffer& cmd, const GPUDepthStencilDesc& state); 
@@ -287,9 +287,10 @@ void gpu_draw_indexed(const GPUCommandBuffer& cmd, void* data, uint32_t index_co
 void gpu_draw_indexed_indirect_count(const GPUCommandBuffer& cmd, void* data, const GPUPointer& commands, const GPUPointer& draw_count, uint32_t max_draw_count);
 
 void gpu_swapchain_init(Window& wnd);
-GPUTexture gpu_swapchain_acquire_next(GPUSemaphore& sem);
-void gpu_swapchain_present(GPUQueue queue, GPUSemaphore& sem);
+GPUTexture gpu_swapchain_acquire_next(GPUSemaphore sem);
+void gpu_swapchain_present(GPUQueue queue, GPUSemaphore sem);
 bool gpu_swapchain_set_present_mode(GPUPresentMode mode);
+const GPUProperties& gpu_get_properties();
 
 constexpr GPUTextureUsage operator|(GPUTextureUsage lhs, GPUTextureUsage rhs)
 {
