@@ -173,13 +173,6 @@ export bool imgui_backend_init(Window* window)
 	for(int i = 0; i < 2; i++)
 		rd->cbuf_matrix[i] = gpu_allocate_memory(sizeof(mat4), GPU_MEMORY_HOST, GPU_BUFFER_UNIFORM);
 
-	auto shader = load_shader("shaders/imgui");
-	if(!shader.has_value())
-	{
-		log::error("imgui_backend: failed to load shader: {}", shader.error());
-		return false;
-	}
-
 	GPUBlendDesc alpha_blend
 	{
 		.src_color_factor = GPU_BLEND_FACTOR_SRC_ALPHA,
@@ -188,7 +181,7 @@ export bool imgui_backend_init(Window* window)
 		.dst_alpha_factor = GPU_BLEND_FACTOR_ZERO
 	};
 
-	rd->pso = gpu_create_graphics_pipeline(*shader,
+	rd->pso = gpu_create_graphics_pipeline(load_shader("shaders/imgui"),
 	{		
 		.color_targets = {GPU_FORMAT_BGRA8_SRGB},
 		.blendstate = &alpha_blend

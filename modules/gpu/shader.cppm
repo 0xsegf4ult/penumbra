@@ -65,7 +65,7 @@ export struct ShaderIR
 	} pconst;
 };
 
-export std::expected<ShaderIR, std::string_view> load_shader(const vfs::path& path)
+export std::expected<ShaderIR, std::string_view> try_load_shader(const vfs::path& path)
 {
 	log::info("gpu_shader: loading shader {}", path.string());
 
@@ -96,6 +96,18 @@ export std::expected<ShaderIR, std::string_view> load_shader(const vfs::path& pa
 	}
 
 	return res;
+}
+
+export ShaderIR load_shader(const vfs::path& path)
+{
+	auto res = try_load_shader(path);
+	if(!res.has_value())
+	{
+		auto msg = std::format("gpu: failed to load shader [{}]: {}", path.string(), res.error());
+		panic(msg.c_str());
+	}
+
+	return *res;
 }
 
 }

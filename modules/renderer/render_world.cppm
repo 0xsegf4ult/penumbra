@@ -57,11 +57,11 @@ public:
 	{
 		host_objects = gpu_allocate_memory(sizeof(RenderObjectData) * object_capacity, GPU_MEMORY_HOST, GPU_BUFFER_UPLOAD);
 		objects = gpu_allocate_memory(sizeof(RenderObjectData) * object_capacity);
-		instance_cull_cs = gpu_create_compute_pipeline(*load_shader("shaders/instance_cull"));
-		cluster_cull_cs = gpu_create_compute_pipeline(*load_shader("shaders/cluster_cull"));
-		cmdgen_vb_cs = gpu_create_compute_pipeline(*load_shader("shaders/generate_commands_vb"));
-		ps_index_cs = gpu_create_compute_pipeline(*load_shader("shaders/prefix_scan_index"));
-		ps_partial_cs = gpu_create_compute_pipeline(*load_shader("shaders/prefix_scan_add_partial"));
+		instance_cull_cs = gpu_create_compute_pipeline(load_shader("shaders/instance_cull"));
+		cluster_cull_cs = gpu_create_compute_pipeline(load_shader("shaders/cluster_cull"));
+		cmdgen_vb_cs = gpu_create_compute_pipeline(load_shader("shaders/generate_commands_vb"));
+		ps_index_cs = gpu_create_compute_pipeline(load_shader("shaders/prefix_scan_index"));
+		ps_partial_cs = gpu_create_compute_pipeline(load_shader("shaders/prefix_scan_add_partial"));
 	}	
 
 	~RenderWorld()

@@ -191,13 +191,13 @@ void renderer_init(Window& wnd)
 
 	renderer_create_rendertargets();
 
-	renderer->visbuffer_build_pso = gpu_create_graphics_pipeline(*load_shader("shaders/visbuffer_build_opaque"), 	
+	renderer->visbuffer_build_pso = gpu_create_graphics_pipeline(load_shader("shaders/visbuffer_build_opaque"), 	
 	{
 		.color_targets = {GPU_FORMAT_R32_UINT},
 		.depth_format = GPU_FORMAT_D32_SFLOAT
 	});
 
-	renderer->vb_resolve_cs = gpu_create_compute_pipeline(*load_shader("shaders/visbuffer_resolve"));
+	renderer->vb_resolve_cs = gpu_create_compute_pipeline(load_shader("shaders/visbuffer_resolve"));
 }
 
 void renderer_shutdown()
