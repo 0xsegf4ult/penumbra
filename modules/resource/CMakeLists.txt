@@ -4,5 +4,11 @@ target_link_libraries(penumbra_resource PRIVATE penumbra_core penumbra_math penu
 
 target_sources(penumbra_resource PUBLIC FILE_SET CXX_MODULES
 	FILES
+	api.cppm
 	geometry.cppm
-	resource_manager.cppm)
+	material.cppm
+	mod.cppm
+	resource_id.cppm
+	texture.cppm
+	PRIVATE
+	impl.cpp)

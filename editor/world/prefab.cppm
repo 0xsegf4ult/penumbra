@@ -1,6 +1,7 @@
 export module penumbra.editor:prefab;
 
 import :world_state;
+import :render_object_component;
 
 import penumbra.core;
 import penumbra.math;
@@ -30,6 +31,25 @@ struct PrefabFileFormat
                 uint32_t node_table_offset;
                 uint32_t node_table_count;
         };
+
+	struct Material
+	{
+		uint32_t name;
+
+		vec3 diffuse_factor;
+		float roughness_factor;
+		float metallic_factor;
+		float normal_factor;
+		float reflectivity;
+		float alpha_cf;
+		vec3 emissive_factor;
+		uint32_t flags;
+
+		uint32_t albedo;
+		uint32_t mro;
+		uint32_t normalmap;
+		uint32_t emissive;
+	};
 
 	struct Node
         {
@@ -89,6 +109,34 @@ export void load_prefab(WorldState& world, const vfs::path& path)
 	{
 		return reinterpret_cast<const char*>(pdata + header->string_table_offset + offset);
 	};
+	const auto* mtl_table = reinterpret_cast<const PrefabFileFormat::Material*>(pdata + header->material_table_offset);
+	std::map<uint32_t, ResourceID> mtl_map;
+
+	for(uint32_t i = 0; i < header->material_table_count; i++)
+	{
+		const PrefabFileFormat::Material& mtl = mtl_table[i];
+
+		mtl_map[i] = resource_manager_create_material
+		({
+			.name = (mtl.name > 0) ? read_string_table(mtl.name) : std::format("material_pbr_{}", i),
+			.factors = 
+			{
+				.diffuse = mtl.diffuse_factor,
+				.roughness = mtl.roughness_factor,
+				.metallic = mtl.metallic_factor,
+				.normal = mtl.normal_factor,
+				.reflectivity = mtl.reflectivity,
+				.alpha_cf = mtl.alpha_cf,
+				.emissive = mtl.emissive_factor,
+			},
+			.flags = mtl.flags,
+			.albedo = mtl.albedo > 0 ? resource_manager_load_texture(vfs::path{"textures"} / read_string_table(mtl.albedo)) : ResourceID{},
+			.mro = mtl.mro > 0 ? resource_manager_load_texture(vfs::path{"textures"} / read_string_table(mtl.mro)) : ResourceID{},
+			.normalmap = mtl.normalmap > 0 ? resource_manager_load_texture(vfs::path{"textures"} / read_string_table(mtl.normalmap)) : ResourceID{},
+			.emissive = mtl.emissive > 0 ? resource_manager_load_texture(vfs::path{"textures"} / read_string_table(mtl.emissive)) : ResourceID{},
+		});
+		
+	}
 
 	const auto* node_table = reinterpret_cast<const PrefabFileFormat::Node*>(pdata + header->node_table_offset);
 
@@ -127,16 +175,23 @@ export void load_prefab(WorldState& world, const vfs::path& path)
 					geom = resource_manager_load_geometry(vfs::path{"meshes"} / read_string_table(smc->mesh));
 				}
 
+				ResourceID material;
+				if(smc->material)
+					material = mtl_map[smc->material];
+
 				auto& geom_data = resource_manager_get_geometry(geom);
 				auto rd_object = renderer_world_insert_object
 				({
 				 	ntx,
 					RENDER_BUCKET_DEFAULT,
+					material.get_handle(),
 					geom_data.l0_cluster_count,
 					geom_data.lod_offset,
 					geom_data.lod_count
 				});
 
+				graph.emplace<render_object_component>(node_ent, geom, material, rd_object);
+				
 				cptr += sizeof(PrefabFileFormat::StaticMeshComponent);
 				break;
 			}

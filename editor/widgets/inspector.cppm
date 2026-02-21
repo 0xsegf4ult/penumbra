@@ -2,10 +2,12 @@ export module penumbra.editor:inspector;
 
 import :camera_component;
 import :light_components;
+import :render_object_component;
 import :widget;
 import :world_state;
 
 import penumbra.ecs;
+import penumbra.resource;
 import imgui;
 import std;
 
@@ -45,6 +47,13 @@ public:
 		auto* dlight = graph.try_get<directional_light_component>(world->selected_entity);
 		if(dlight)
 			inspect_directional_light(*dlight);
+
+		auto* robj = graph.try_get<render_object_component>(world->selected_entity);
+		if(robj)
+		{
+			if(robj->material.get_handle())
+				inspect_material(resource_manager_get_material(robj->material));
+		}
 	}
 private:
 	void inspect_transform(Transform& transform)
@@ -86,6 +95,26 @@ private:
 			ImGui::DragFloat3("Direction", &light.direction.x, 0.01f, -1.0f, 1.0f);
 			ImGui::ColorEdit3("Color", &light.color.x);
 			ImGui::DragFloat("Intensity", &light.intensity, 0.1f, 0.0f, 200000.0f, "%.0flx");
+		}
+	}
+
+	void inspect_material(const MaterialResource& mtl)
+	{
+		if(ImGui::CollapsingHeader("Material"))
+		{
+			vec3 df = mtl.factors.diffuse;
+			float rf = mtl.factors.roughness;
+			float mf = mtl.factors.metallic;
+			float nf = mtl.factors.normal;
+			float refl = mtl.factors.reflectivity;
+			vec3 ef = mtl.factors.emissive;
+		
+			ImGui::DragFloat3("Diffuse factor", &df.x, 0.01f, 0.0f, 1.0f);
+			ImGui::DragFloat("Roughness factor", &rf, 0.01f, 0.0f, 1.0f);
+			ImGui::DragFloat("Metallic factor", &mf, 0.01f, 0.0f, 1.0f);
+			ImGui::DragFloat("Normal factor", &nf, 0.01f, 0.0f, 1.0f);
+			ImGui::DragFloat("Reflectivity", &refl, 0.01f, 0.0f, 1.0f);
+			ImGui::ColorEdit3("Emissive color", &ef.x);
 		}
 	}
 

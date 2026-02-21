@@ -1,5 +1,6 @@
 export module penumbra.renderer:api;
-export import :geometry_buffer;
+import :geometry_buffer;
+import :material;
 import penumbra.core;
 import penumbra.math;
 import penumbra.gpu;
@@ -49,6 +50,9 @@ export void renderer_next_frame();
 export void renderer_process_frame(double dt);
 export uint32_t renderer_gfx_frame_index();
 export uint64_t renderer_resource_transfer_syncval();
+export void renderer_write_texture(GPUTexture texture, std::span<const std::byte> data, uint32_t num_mips = 1, uint32_t num_layers = 1);
+export void renderer_write_material(const RenderMaterialData& data);
+export GPUDevicePointer renderer_materials_device_pointer();
 export RenderObject renderer_world_insert_object(const RenderObjectDescription& data);
 export RenderBucketData renderer_world_get_bucket(RenderView view, RenderBucket bucket);
 export GPUTextureDescriptor* renderer_get_framebuffer();

@@ -10,6 +10,7 @@ target_sources(editor PUBLIC FILE_SET CXX_MODULES
 	widgets/widget.cppm
 	world/components/camera.cppm
 	world/components/lights.cppm
+	world/components/render_object.cppm
 	world/prefab.cppm
 	world/state.cppm
 	PRIVATE main.cpp)

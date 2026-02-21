@@ -6,6 +6,7 @@ module;
 module penumbra.renderer;
 import :geometry_buffer;
 import :render_world;
+import :material;
 
 import penumbra.core;
 import penumbra.gpu;
@@ -16,6 +17,27 @@ using std::uint64_t, std::size_t;
 
 namespace penumbra
 {
+
+struct StreamBuffer
+{
+	constexpr static size_t chunk_size = 32 * 1024 * 1024; 
+	struct Chunk
+	{
+		GPUPointer data;
+		uint32_t head{0u};
+		uint64_t syncval{0};
+	};
+
+	std::vector<Chunk> chunks;
+};
+
+struct TextureWriteRequest
+{
+	GPUPointer data;
+	GPUTexture texture;
+	uint32_t num_mips;
+	uint32_t num_layers;
+};
 
 struct renderer_context_t
 {
@@ -40,6 +62,10 @@ struct renderer_context_t
 
 	uvec2 last_render_resolution{800u, 600u};
 	uvec2 render_resolution{800u, 600u};
+
+	RenderMaterialStorage materials;
+	StreamBuffer stream_buffer;
+	std::vector<TextureWriteRequest> texwrites;
 
 	GPUTexture visbuffer_tex;
 	GPUTexture depthbuffer_tex;
@@ -119,6 +145,11 @@ void renderer_init(Window& wnd)
 	for(int i = 0; i < config::renderer_frames_in_flight; i++)
 		renderer->camera_cbv[i] = gpu_allocate_memory(sizeof(mat4), GPU_MEMORY_MAPPED, GPU_BUFFER_UNIFORM);
 
+	renderer->stream_buffer.chunks.push_back({gpu_allocate_memory(StreamBuffer::chunk_size, GPU_MEMORY_HOST, GPU_BUFFER_UPLOAD), 0u});
+
+	renderer->materials.data = gpu_allocate_memory(renderer->materials.capacity * sizeof(RenderMaterialData), GPU_MEMORY_MAPPED);
+	renderer_write_material(RenderMaterialData{});
+
 	renderer_create_rendertargets();
 
 	renderer->visbuffer_build_pso = gpu_create_graphics_pipeline(*load_shader("shaders/visbuffer_build_opaque"), 	
@@ -143,6 +174,10 @@ void renderer_shutdown()
 
 	for(auto& cbv : renderer->camera_cbv)
 		gpu_free_memory(cbv);
+	gpu_free_memory(renderer->materials.data);
+
+	for(auto& chunk : renderer->stream_buffer.chunks)
+		gpu_free_memory(chunk.data);
 
 	renderer_geometry_shutdown();
 
@@ -183,7 +218,7 @@ void renderer_next_frame()
 
 	renderer->frame_index = (renderer->frame_index + 1) % config::renderer_frames_in_flight;
 	if(!gpu_wait_queue(GPU_QUEUE_GRAPHICS, renderer->gfx_queue_frames[renderer->frame_index]))
-		std::abort();
+		panic("renderer: gfx queue stuck!");
 
 	gpu_wait_queue(GPU_QUEUE_COMPUTE, renderer->compute_queue_frames[renderer->frame_index]);
 	renderer->cur_swapchain = gpu_swapchain_acquire_next(renderer->swapchain_acquire[renderer->frame_index]);
@@ -191,12 +226,32 @@ void renderer_next_frame()
 
 void renderer_copy_resources_async()
 {
-	if(!renderer_geometry_needs_upload())
+	auto transfer_time = gpu_semaphore_read_counter(renderer->transfer_resource_semaphore);
+	for(auto& chunk : renderer->stream_buffer.chunks)
+	{
+		if(chunk.syncval <= transfer_time)
+			chunk.head = 0;
+	}
+
+	if(!renderer_geometry_needs_upload() && renderer->texwrites.empty())
 		return;
 
 	auto cmd = gpu_record_commands(GPU_QUEUE_TRANSFER);
-	renderer_geometry_copy_async(cmd);
+	
+	if(renderer_geometry_needs_upload())
+	{
+		renderer_geometry_copy_async(cmd);
+	}
+
+	for(auto& write : renderer->texwrites)
+	{
+		gpu_texture_layout_transition(cmd, write.texture, GPU_STAGE_NONE, GPU_STAGE_TRANSFER, GPU_TEXTURE_LAYOUT_UNDEFINED, GPU_TEXTURE_LAYOUT_GENERAL);
+		gpu_copy_to_texture(cmd, write.data, write.texture, write.num_mips);
+	}
+	renderer->texwrites.clear();
+
 	renderer->transfer_resource_sync++;
+	gpu_barrier(cmd, GPU_STAGE_TRANSFER, GPU_STAGE_ALL);
 	gpu_emit_signal(cmd, GPU_STAGE_ALL, renderer->transfer_resource_semaphore, renderer->transfer_resource_sync);
 	auto transfer_sync = gpu_submit(GPU_QUEUE_TRANSFER, cmd);
 }
@@ -312,6 +367,50 @@ uint32_t renderer_gfx_frame_index()
 uint64_t renderer_resource_transfer_syncval()
 {
 	return renderer->transfer_resource_sync;
+}
+
+StreamBuffer::Chunk& stream_buffer_acquire(size_t size)
+{
+	if(size > StreamBuffer::chunk_size)
+	{
+		log::error("stream_buffer_acquire: data {} larger than chunk size {}", size, StreamBuffer::chunk_size);
+		std::abort();
+	}
+
+	for(auto& chunk : renderer->stream_buffer.chunks)
+	{	
+		if(chunk.head + size <= StreamBuffer::chunk_size)
+			return chunk;
+	}
+
+	renderer->stream_buffer.chunks.push_back({gpu_allocate_memory(StreamBuffer::chunk_size, GPU_MEMORY_HOST, GPU_BUFFER_UPLOAD), 0u});
+	return renderer->stream_buffer.chunks.back();
+}
+
+void renderer_write_texture(GPUTexture texture, std::span<const std::byte> data, uint32_t num_mips, uint32_t num_layers)
+{
+	auto& stream_block = stream_buffer_acquire(data.size());
+	memcpy(gpu_map_memory(stream_block.data + stream_block.head), data.data(), data.size());
+	renderer->texwrites.push_back({stream_block.data + stream_block.head, texture, num_mips, num_layers});
+	stream_block.head += data.size();
+	stream_block.syncval = renderer->transfer_resource_sync + 1;
+}
+
+void renderer_write_material(const RenderMaterialData& data)
+{
+	if(renderer->materials.size >= renderer->materials.capacity)
+	{
+		log::warn("renderer_write_material: out of material storage memory [{}]", renderer->materials.capacity);
+		return;
+	}
+
+	memcpy(gpu_map_memory(renderer->materials.data) + (renderer->materials.size * sizeof(RenderMaterialData)), &data, sizeof(RenderMaterialData));
+	renderer->materials.size++;
+}
+
+GPUDevicePointer renderer_materials_device_pointer()
+{
+	return gpu_host_to_device_pointer(renderer->materials.data);
 }
 
 RenderObject renderer_world_insert_object(const RenderObjectDescription& data)
