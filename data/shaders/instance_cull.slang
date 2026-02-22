@@ -55,8 +55,7 @@ void computeMain(uint DTid: SV_DispatchThreadID, uniform CSInput input)
 	uint bucket = object->pack_bucket_lcount >> 16;
 	uint global_offset = input.buckets[bucket].offset;
 
-	float3 cam_pos = -culling_data.viewmat[3].xyz;
-	float dist = distance(center.xyz, cam_pos);
+	float dist = distance(center.xyz, culling_data.cam_pos.xyz);
 	uint lodIndex = uint(max(1.0 + log(dist / culling_data.lod_base) / log(culling_data.lod_step), 0.0));
 	lodIndex = min(lodIndex, lod_count - 1);
 

@@ -64,6 +64,7 @@ enum CullingFlags : uint
 struct CullingData
 {
 	float4x4 viewmat;	
+	float4 cam_pos;
 	float4 frustum_planes[4];
 	float lod_base;
 	float lod_step;

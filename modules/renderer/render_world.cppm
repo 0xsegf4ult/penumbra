@@ -19,6 +19,7 @@ namespace penumbra
 struct RenderViewCBuffer
 {
 	mat4 viewmat;
+	vec4 cam_pos;
 	vec4 frustum_planes[4];
 	float lod_step;
 	float lod_base;
@@ -126,14 +127,15 @@ public:
 		return RenderView{static_cast<uint32_t>(views.size())};
 	}
 
-	void update_view_camera(RenderView render_view, mat4 view, mat4 proj)
+	void update_view_camera(RenderView render_view, mat4 view, mat4 proj, vec3 pos)
 	{
 		assert(render_view);
 		
 		auto& rv = views[render_view - 1];
 		auto* cbuffer = reinterpret_cast<RenderViewCBuffer*>(gpu_map_memory(rv.cbuffer[renderer_gfx_frame_index()]));
 		cbuffer->viewmat = view;
-		
+		cbuffer->cam_pos = vec4{pos, 1.0f};
+
 		mat4 projT = mat4::transpose(proj);
 		const vec4 frustumX = Plane(projT[3] + projT[0]).normalize().as_vector();
 		const vec4 frustumY = Plane(projT[3] + projT[1]).normalize().as_vector();
@@ -229,7 +231,7 @@ public:
 		{
 			auto* cbuffer = reinterpret_cast<RenderViewCBuffer*>(gpu_map_memory(view.cbuffer[renderer_gfx_frame_index()]));
 			cbuffer->lod_base = 10.0f;
-			cbuffer->lod_step = 1.5f;
+			cbuffer->lod_step = 3.5f;
 			cbuffer->flags = 1;
 
 			for(int i = 0; i < RENDER_BUCKET_COUNT; i++)

@@ -165,6 +165,7 @@ ResourceID resource_manager_load_texture(const vfs::path& path)
 
 	GPUTexture tex = gpu_create_texture
 	({
+	 	.type = num_layers == 6 ? GPU_TEXTURE_CUBE : GPU_TEXTURE_2D,
 		.dim = {res_table[0].width, res_table[0].height, 1u},
 		.mip_count = num_mips,
 		.layer_count = num_layers,
@@ -174,7 +175,7 @@ ResourceID resource_manager_load_texture(const vfs::path& path)
 
 	renderer_write_texture(tex, {ptr + res_table[0].data_offset, tex_size}, num_mips, num_layers);
 
-	GPUTextureDescriptor descriptor = gpu_texture_view_descriptor(tex, {.format = TextureFileFormat::parse_format(header->texformat)});
+	GPUTextureDescriptor descriptor = gpu_texture_view_descriptor(tex, {.type = num_layers == 6 ? GPU_TEXTURE_CUBE : GPU_TEXTURE_2D, .format = TextureFileFormat::parse_format(header->texformat)});
 
 	context->texture.push_back
 	({

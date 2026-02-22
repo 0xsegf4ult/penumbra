@@ -1,6 +1,7 @@
 export module penumbra.renderer:api;
 import :geometry_buffer;
 import :material;
+import :envmap;
 import penumbra.core;
 import penumbra.math;
 import penumbra.gpu;
@@ -69,7 +70,8 @@ export RenderBucketData renderer_world_get_bucket(RenderView view, RenderBucket 
 export void renderer_set_output_rendertarget(GPUTexture rt);
 export uvec2 renderer_get_render_resolution();
 export void renderer_update_render_resolution(uvec2 res);
-export void renderer_update_camera(const mat4& view, const mat4& proj, float exposure);
+export void renderer_update_camera(const mat4& view, const mat4& proj, const vec3& pos, float exposure);
 export void renderer_add_visbuffer_hook(visbuffer_read_hook&& hook); 
+export void renderer_set_envmap(const RenderEnvironmentMap& envmap);
 
 }

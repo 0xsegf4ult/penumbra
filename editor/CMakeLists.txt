@@ -11,6 +11,7 @@ target_sources(editor PUBLIC FILE_SET CXX_MODULES
 	world/components/camera.cppm
 	world/components/lights.cppm
 	world/components/render_object.cppm
+	world/envmap.cppm
 	world/prefab.cppm
 	world/state.cppm
 	PRIVATE main.cpp)

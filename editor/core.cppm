@@ -8,6 +8,7 @@ import penumbra.ui;
 import imgui;
 import std;
 
+import :envmap;
 import :prefab;
 import :camera_component;
 import :inspector;
@@ -34,7 +35,13 @@ public:
 
 		widgets.push_back(std::make_unique<ScenegraphView>(world));
 		widgets.push_back(std::make_unique<Inspector>(world));
-		
+
+		auto envmap = load_envmap("hdri/kloppenheim");
+		renderer_set_envmap
+		(RenderEnvironmentMap{
+			.irradiance = resource_manager_get_texture(envmap.irradiance).descriptor,
+			.prefiltered = resource_manager_get_texture(envmap.prefiltered).descriptor
+		});		
 		load_prefab(*world, "bistrov2");
 	}
 
@@ -147,7 +154,7 @@ private:
 		};
 
 
-		renderer_update_camera(view, proj, camera.get_exposure());
+		renderer_update_camera(view, proj, camera_transform.translation, camera.get_exposure());
 		widget_viewport->update_camera(view, proj);
 	}
 

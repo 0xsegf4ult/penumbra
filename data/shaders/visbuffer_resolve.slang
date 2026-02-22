@@ -14,7 +14,7 @@ struct CSInput
 	Ptr<MaterialPBR, Access.Read> materials;
 	Ptr<GeometryCluster, Access.Read> clusters;
 	ResourceHandle<Texture2D<uint>> visbuffer;
-	ResourceHandle<RWTexture2D> framebuffer;
+	ResourceHandle<RWTexture2D<float3>> framebuffer;
 };
 
 float4 clip_to_view(float4 clip)
@@ -66,9 +66,10 @@ void computeMain(uint groupIndex : SV_GroupIndex, uint2 Gid : SV_GroupID, unifor
 	float3 ray_direction_quad_x = normalize(far_dx - ray_origin);
 	float3 ray_direction_quad_y = normalize(far_dy - ray_origin);
 
+	ResourceHandle<SamplerState> smp = {0u};
 	if(primitiveID == 0)
 	{
-		input.framebuffer.desc[pixel] = float4(1.0);
+		input.framebuffer.desc[pixel] = consts.prefiltered.desc.SampleLevel(smp.desc, ray_direction, 0) * consts.exposure * 1200.0;
 	}
 
 	float3 p0;
@@ -143,8 +144,7 @@ void computeMain(uint groupIndex : SV_GroupIndex, uint2 Gid : SV_GroupID, unifor
 	float2 uvs = attribute_at_bary(uv0, uv1, uv2, bary);
 	float2 uv_dx = uvs - attribute_at_bary(uv0, uv1, uv2, bary_quad_x);
 	float2 uv_dy = uvs - attribute_at_bary(uv0, uv1, uv2, bary_quad_y);
-	float3 cam_pos = consts.inverse_view[3].xyz;
-	float3 V = normalize(cam_pos - p);
+	float3 V = normalize(consts.cam_pos.xyz - p);
 	
 	ResourceHandle<SamplerState> smp_aniso = {1u};
 	float3 albedo = (mtl.albedo.valid() ? mtl.albedo.desc.SampleGrad(smp_aniso.desc, uvs, uv_dx, uv_dy).xyz : float3(1.0)) * mtl.diffuse_factor.xyz;
@@ -160,6 +160,8 @@ void computeMain(uint groupIndex : SV_GroupIndex, uint2 Gid : SV_GroupID, unifor
 	float NdotV = dot(N, V);
 	N += (2.0 * saturate(-NdotV)) * V;
 
+	float3 amb_IRR = consts.irradiance.desc.SampleLevel(smp.desc, N, 0) * 1200.0;
+
 	NdotV = dot(N, V);
 
 	float3 l0 = float3(0.0);
@@ -169,12 +171,18 @@ void computeMain(uint groupIndex : SV_GroupIndex, uint2 Gid : SV_GroupID, unifor
 	float3 f0 = float3(reflectance * (1.0 - metallic)) + albedo * metallic;
 	float3 f90 = saturate(50.0 * f0);
 
+	float2 envBRDF = consts.brdf.desc.SampleLevel(smp.desc, float2(max(NdotV, 0.0), roughness), 0);
+
+	float3 reflection = reflect(-V, N);
+	float3 amb_PFC = consts.prefiltered.desc.SampleLevel(smp.desc, reflection, roughness * 8.0) * 1200.0;
+
 	roughness = max(roughness, 0.045);
 	l0 += calculate_direct_lighting(N, V, NdotV, diffuse, roughness, f0);
 
-	float3 ambient = float3(0.005);
-	float3 hdr = float3(ambient + l0 + emissive) * consts.exposure;
-	input.framebuffer.desc[pixel] = float4(hdr, 1.0); 
+	float horizon = min(1.0 + dot(reflection, N), 1.0);
+	float3 amb_SPEC = amb_PFC * (f0 * envBRDF.x + f90 * envBRDF.y) * horizon * horizon;
+	float3 ambient = diffuse * amb_IRR + amb_SPEC;
+	input.framebuffer.desc[pixel] = (ambient + l0 + emissive) * consts.exposure;
 
 	}
 }

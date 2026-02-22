@@ -15,9 +15,9 @@ enum GPUBufferUsage { GPU_BUFFER_INVALID, GPU_BUFFER_STORAGE, GPU_BUFFER_UNIFORM
 		      GPU_BUFFER_UPLOAD, GPU_BUFFER_VERTEX, GPU_BUFFER_INDEX };
 enum GPUTextureType { GPU_TEXTURE_1D, GPU_TEXTURE_2D, GPU_TEXTURE_3D, GPU_TEXTURE_CUBE, GPU_TEXTURE_2D_ARRAY };
 enum GPUFormat { GPU_FORMAT_UNDEFINED, GPU_FORMAT_R8_UNORM, GPU_FORMAT_RG8_UNORM, GPU_FORMAT_RGBA8_UNORM,
-		GPU_FORMAT_RGBA8_SRGB, GPU_FORMAT_BGRA8_SRGB, GPU_FORMAT_D16_UNORM, GPU_FORMAT_D32_SFLOAT, 
-		GPU_FORMAT_R32_UINT, GPU_FORMAT_B10GR11_UFLOAT, GPU_FORMAT_BC4_UNORM, GPU_FORMAT_BC5_UNORM, 
-		GPU_FORMAT_BC6H_UFLOAT, GPU_FORMAT_BC7_UNORM, GPU_FORMAT_BC7_SRGB };
+		GPU_FORMAT_RGBA8_SRGB, GPU_FORMAT_BGRA8_SRGB, GPU_FORMAT_RG16_SFLOAT, GPU_FORMAT_D16_UNORM, 
+		GPU_FORMAT_D32_SFLOAT, GPU_FORMAT_R32_UINT, GPU_FORMAT_B10GR11_UFLOAT, GPU_FORMAT_BC4_UNORM, 
+		GPU_FORMAT_BC5_UNORM, GPU_FORMAT_BC6H_UFLOAT, GPU_FORMAT_BC7_UNORM, GPU_FORMAT_BC7_SRGB };
 enum GPUTextureLayout { GPU_TEXTURE_LAYOUT_UNDEFINED, GPU_TEXTURE_LAYOUT_GENERAL, GPU_TEXTURE_LAYOUT_PRESENT };
 enum GPUFilter { GPU_FILTER_NEAREST, GPU_FILTER_LINEAR };
 enum GPUAddressMode { GPU_ADDRESS_MODE_REPEAT, GPU_ADDRESS_MODE_MIRRORED_REPEAT, GPU_ADDRESS_MODE_CLAMP_TO_EDGE };
@@ -260,7 +260,7 @@ uint64_t gpu_semaphore_read_counter(GPUSemaphore semaphore);
 
 void gpu_mem_copy(const GPUCommandBuffer& cmd, const GPUPointer& src, const GPUPointer& dst, size_t size);
 void gpu_mem_clear(const GPUCommandBuffer& cmd, const GPUPointer& dst, size_t size);
-void gpu_copy_to_texture(const GPUCommandBuffer& cmd, const GPUPointer& src, GPUTexture dst, uint32_t mips = 1);
+void gpu_copy_to_texture(const GPUCommandBuffer& cmd, const GPUPointer& src, GPUTexture dst, uint32_t mips = 1, uint32_t layers = 1);
 void gpu_copy_from_texture(const GPUCommandBuffer& cmd, GPUTexture src, const GPUPointer& dst);
 
 void gpu_barrier(const GPUCommandBuffer& cmd, GPUStage src, GPUStage dst, GPUHazard hazards = GPU_HAZARD_NONE);

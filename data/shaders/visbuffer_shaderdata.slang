@@ -1,10 +1,13 @@
 #pragma once
 
+#include "globals.slang"
+
 struct VisbufferConstants
 {
 	float4x4 camera;
 	float4x4 inverse_projection;
 	float4x4 inverse_view;
+	float4 cam_pos;
 	
 	Ptr<float3, Access.Read> vertex_pos;
 	Ptr<float2, Access.Read> vertex_uv;
@@ -16,5 +19,8 @@ struct VisbufferConstants
 	float4 light_color;
 
 	float exposure;
+	ResourceHandle<Texture2D<float2>> brdf;
+	ResourceHandle<TextureCube<float3>> irradiance;
+	ResourceHandle<TextureCube<float3>> prefiltered;
 };
 

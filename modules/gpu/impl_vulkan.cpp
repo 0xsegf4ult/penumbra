@@ -109,6 +109,8 @@ constexpr VkFormat format_to_vk(GPUFormat fmt)
 		return VK_FORMAT_R8G8B8A8_SRGB;
 	case GPU_FORMAT_BGRA8_SRGB:
 		return VK_FORMAT_B8G8R8A8_SRGB;
+	case GPU_FORMAT_RG16_SFLOAT:
+		return VK_FORMAT_R16G16_SFLOAT;
 	case GPU_FORMAT_D16_UNORM:
 		return VK_FORMAT_D16_UNORM;
 	case GPU_FORMAT_D32_SFLOAT:
@@ -203,6 +205,7 @@ constexpr uint32_t format_blocksize(GPUFormat fmt)
 	case GPU_FORMAT_BC7_SRGB:
 		return 16u;
 	case GPU_FORMAT_R32_UINT:
+	case GPU_FORMAT_RG16_SFLOAT:
 	case GPU_FORMAT_RGBA8_SRGB:
 	case GPU_FORMAT_RGBA8_UNORM:
 	case GPU_FORMAT_BGRA8_SRGB:
@@ -2197,7 +2200,7 @@ void gpu_mem_clear(const GPUCommandBuffer& cmd, const GPUPointer& dst, size_t si
 	vkCmdFillBuffer(std::bit_cast<VkCommandBuffer>(cmd.handle), dst_buffer.handle, dst.offset, size, 0);
 }
 
-void gpu_copy_to_texture(const GPUCommandBuffer& cmd, const GPUPointer& src, GPUTexture dst, uint32_t mips)
+void gpu_copy_to_texture(const GPUCommandBuffer& cmd, const GPUPointer& src, GPUTexture dst, uint32_t mips, uint32_t layers)
 {
 	assert(src.handle);
 	auto& buffer = gpu_context->buffers[src.handle - 1];
@@ -2212,7 +2215,7 @@ void gpu_copy_to_texture(const GPUCommandBuffer& cmd, const GPUPointer& src, GPU
 			.aspectMask = format_to_vk_aspect(texture.format),
 			.mipLevel = 0,
 			.baseArrayLayer = 0,
-			.layerCount = VK_REMAINING_ARRAY_LAYERS
+			.layerCount = layers
 		},
 		.imageOffset = {0, 0, 0},
 		.imageExtent = {texture.size.x, texture.size.y, texture.size.z}
@@ -2222,7 +2225,7 @@ void gpu_copy_to_texture(const GPUCommandBuffer& cmd, const GPUPointer& src, GPU
 	{
 		if(i > 0)
 		{
-			region.bufferOffset += size_for_image(region.imageExtent.width, region.imageExtent.height, region.imageExtent.depth, texture.format);
+			region.bufferOffset += size_for_image(region.imageExtent.width, region.imageExtent.height, region.imageExtent.depth, texture.format) * layers;
 			region.imageSubresource.mipLevel = i;
 			region.imageExtent.width = region.imageExtent.width > 1 ? region.imageExtent.width / 2 : 1u;
 			region.imageExtent.height = region.imageExtent.height > 1 ? region.imageExtent.height / 2 : 1u;
