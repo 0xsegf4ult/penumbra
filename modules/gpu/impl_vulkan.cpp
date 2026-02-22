@@ -2394,7 +2394,7 @@ void gpu_set_depth_stencil_state(const GPUCommandBuffer& cmd, const GPUDepthSten
 	vkCmdSetDepthCompareOp(cb, depth_test_to_vk(state.depth_test));
         vkCmdSetDepthTestEnable(cb, state.depth_mode > 0);
         vkCmdSetDepthWriteEnable(cb, (state.depth_mode & GPU_DEPTH_WRITE) ? true : false);
-        vkCmdSetDepthClampEnableEXT(cb, false);
+        vkCmdSetDepthClampEnableEXT(cb, (state.depth_mode & GPU_DEPTH_CLAMP) ? true : false);
 }
 
 void gpu_write_cbuffer_descriptor(const GPUCommandBuffer& cmd, const GPUPointer& cbuffer)

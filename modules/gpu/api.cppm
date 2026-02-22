@@ -58,7 +58,8 @@ enum GPUTextureDescriptorFlags : uint32_t
 enum GPUDepthMode : uint32_t 
 { 
 	GPU_DEPTH_READ = 0x1, 
-	GPU_DEPTH_WRITE = 0x2 
+	GPU_DEPTH_WRITE = 0x2,
+	GPU_DEPTH_CLAMP = 0x4	
 };
 
 enum GPUStage : uint32_t
