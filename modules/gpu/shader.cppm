@@ -67,8 +67,6 @@ export struct ShaderIR
 
 export std::expected<ShaderIR, std::string_view> try_load_shader(const vfs::path& path)
 {
-	log::info("gpu_shader: loading shader {}", path.string());
-
 	ShaderIR res;
 	
 	auto shader_file = vfs::open(path, vfs::access_readonly);

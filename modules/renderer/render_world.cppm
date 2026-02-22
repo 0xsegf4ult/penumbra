@@ -21,8 +21,8 @@ struct RenderViewCBuffer
 	mat4 viewmat;
 	vec4 cam_pos;
 	vec4 frustum_planes[4];
-	float lod_step;
 	float lod_base;
+	float lod_step;
 	float znear;
 	float zfar;
 	uint32_t flags;	
@@ -44,6 +44,7 @@ struct RenderViewData
 
 	std::vector<uint32_t> cluster_bucket_sizes;
 	std::vector<uint32_t> cluster_bucket_offsets;
+	bool is_shadow;
 };
 
 struct RenderObjectData
@@ -64,7 +65,7 @@ public:
 		objects = gpu_allocate_memory(sizeof(RenderObjectData) * object_capacity);
 		instance_cull_cs = gpu_create_compute_pipeline(load_shader("shaders/instance_cull"));
 		cluster_cull_cs = gpu_create_compute_pipeline(load_shader("shaders/cluster_cull"));
-		cmdgen_vb_cs = gpu_create_compute_pipeline(load_shader("shaders/generate_commands_vb"));
+		cmdgen_cs = gpu_create_compute_pipeline(load_shader("shaders/generate_commands"));
 		ps_index_cs = gpu_create_compute_pipeline(load_shader("shaders/prefix_scan_index"));
 		ps_partial_cs = gpu_create_compute_pipeline(load_shader("shaders/prefix_scan_add_partial"));
 	}	
@@ -73,7 +74,7 @@ public:
 	{
 		gpu_destroy_pipeline(ps_partial_cs);
 		gpu_destroy_pipeline(ps_index_cs);
-		gpu_destroy_pipeline(cmdgen_vb_cs);
+		gpu_destroy_pipeline(cmdgen_cs);
 		gpu_destroy_pipeline(cluster_cull_cs);
 		gpu_destroy_pipeline(instance_cull_cs);
 		for(auto& view : views)
@@ -96,7 +97,7 @@ public:
 		gpu_free_memory(host_objects);
 	}
 
-	RenderView register_view()
+	RenderView register_view(bool is_shadow = false)
 	{
 		views.push_back(RenderViewData{});
 		
@@ -123,26 +124,38 @@ public:
 		}
 
 		view.visibility_sums.push_back(gpu_allocate_memory(sizeof(uint32_t)));
+		view.is_shadow = is_shadow;
 
 		return RenderView{static_cast<uint32_t>(views.size())};
 	}
 
-	void update_view_camera(RenderView render_view, mat4 view, mat4 proj, vec3 pos)
+	void update_view_camera(RenderView render_view, const RenderCameraData& cam)
 	{
 		assert(render_view);
 		
 		auto& rv = views[render_view - 1];
 		auto* cbuffer = reinterpret_cast<RenderViewCBuffer*>(gpu_map_memory(rv.cbuffer[renderer_gfx_frame_index()]));
-		cbuffer->viewmat = view;
-		cbuffer->cam_pos = vec4{pos, 1.0f};
+		cbuffer->viewmat = cam.view;
+		cbuffer->cam_pos = vec4{cam.position, 1.0f};
 
-		mat4 projT = mat4::transpose(proj);
-		const vec4 frustumX = Plane(projT[3] + projT[0]).normalize().as_vector();
-		const vec4 frustumY = Plane(projT[3] + projT[1]).normalize().as_vector();
-		cbuffer->frustum_planes[0] = vec4{frustumX.x, frustumX.z, frustumY.y, frustumY.z};
+		mat4 projT = mat4::transpose(cam.proj);
 
-		cbuffer->znear = 0.1f;
-		cbuffer->zfar = 128.0f;
+		if(!rv.is_shadow)
+		{
+			const vec4 frustumX = Plane(projT[3] + projT[0]).normalize().as_vector();
+			const vec4 frustumY = Plane(projT[3] + projT[1]).normalize().as_vector();
+			cbuffer->frustum_planes[0] = vec4{frustumX.x, frustumX.z, frustumY.y, frustumY.z};
+		}
+		else
+		{
+			cbuffer->frustum_planes[0] = Plane(projT[3] + projT[0]).normalize().as_vector();
+			cbuffer->frustum_planes[1] = Plane(projT[3] - projT[0]).normalize().as_vector();
+			cbuffer->frustum_planes[2] = Plane(projT[3] + projT[1]).normalize().as_vector();
+			cbuffer->frustum_planes[3] = Plane(projT[3] - projT[1]).normalize().as_vector();	
+		}
+
+		cbuffer->znear = cam.znear;
+		cbuffer->zfar = cam.zfar;
 	}
 
 	RenderObject insert_object(const RenderObjectDescription& data, array_proxy<RenderView> view_list)
@@ -231,8 +244,16 @@ public:
 		{
 			auto* cbuffer = reinterpret_cast<RenderViewCBuffer*>(gpu_map_memory(view.cbuffer[renderer_gfx_frame_index()]));
 			cbuffer->lod_base = 10.0f;
-			cbuffer->lod_step = 3.5f;
-			cbuffer->flags = 1;
+			if(view.is_shadow)
+			{
+				cbuffer->flags = 5;
+				cbuffer->lod_step = 1.5f;
+			}
+			else
+			{
+				cbuffer->flags = 1;
+				cbuffer->lod_step = 3.5f;
+			}
 
 			for(int i = 0; i < RENDER_BUCKET_COUNT; i++)
 			{
@@ -311,7 +332,7 @@ public:
 
 		compact_drawcalls(cmd);
 
-		gpu_set_pipeline(cmd, cmdgen_vb_cs);
+		gpu_set_pipeline(cmd, cmdgen_cs);
 
 		for(auto& view : views)
 		{
@@ -329,6 +350,7 @@ public:
 				GPUDevicePointer commands;
 				GPUDevicePointer clusters;
 				uint32_t count;
+				int is_visbuffer;
 			} shader_data;
 
 			shader_data.cluster_instances = gpu_host_to_device_pointer(view.clusters);
@@ -339,6 +361,7 @@ public:
 			shader_data.commands = gpu_host_to_device_pointer(view.commands);
 			shader_data.clusters = renderer_geometry_cluster_device_pointer();
 			shader_data.count = size;
+			shader_data.is_visbuffer = !view.is_shadow;
 
 			gpu_dispatch(cmd, &shader_data, {(size / 256u) + 1u, 1u, 1u});
 		}
@@ -443,7 +466,7 @@ private:
 
 	GPUPipeline instance_cull_cs;
 	GPUPipeline cluster_cull_cs;
-	GPUPipeline cmdgen_vb_cs;
+	GPUPipeline cmdgen_cs;
 	GPUPipeline ps_index_cs;
 	GPUPipeline ps_partial_cs;
 };

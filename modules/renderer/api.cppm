@@ -45,6 +45,16 @@ export struct RenderBucketData
 	uint32_t max_instance_count;
 };
 
+export struct RenderCameraData
+{
+	mat4 view;
+	mat4 proj;
+	vec3 position;
+	float znear;
+	float zfar;
+	float exposure{1.0f};
+};
+
 export struct VisbufferInfo
 {
 	GPUTextureDescriptor* texture;
@@ -65,12 +75,12 @@ export uint64_t renderer_resource_transfer_syncval();
 export void renderer_write_texture(GPUTexture texture, std::span<const std::byte> data, uint32_t num_mips = 1, uint32_t num_layers = 1);
 export void renderer_write_material(const RenderMaterialData& data);
 export GPUDevicePointer renderer_materials_device_pointer();
-export RenderObject renderer_world_insert_object(const RenderObjectDescription& data);
+export RenderObject renderer_world_insert_object(const RenderObjectDescription& data, uint32_t shadow_level = 4);
 export RenderBucketData renderer_world_get_bucket(RenderView view, RenderBucket bucket);
 export void renderer_set_output_rendertarget(GPUTexture rt);
 export uvec2 renderer_get_render_resolution();
 export void renderer_update_render_resolution(uvec2 res);
-export void renderer_update_camera(const mat4& view, const mat4& proj, const vec3& pos, float exposure);
+export void renderer_update_camera(const RenderCameraData& camera);
 export void renderer_add_visbuffer_hook(visbuffer_read_hook&& hook); 
 export void renderer_set_envmap(const RenderEnvironmentMap& envmap);
 

@@ -62,8 +62,8 @@ public:
 
 			if(ImGui::IsKeyDown(ImGuiKey_LeftShift))
 			{
-				vec3 right = vector_world_right;
-				vec3 front = vector_world_forward;
+				vec3 front = vector_world_forward * Quaternion::make_mat3(rot);
+				vec3 right = vec3::normalize(vec3::cross(front, vector_world_up)); 
 				
 				vec3 target_dir{0.0f};
 				if(delta.x < 0.0)

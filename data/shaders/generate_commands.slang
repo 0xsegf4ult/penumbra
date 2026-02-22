@@ -11,6 +11,7 @@ struct CSInput
 	Ptr<IndirectCommand, Access.ReadWrite> commands;
 	Ptr<GeometryCluster, Access.Read> clusters;
 	uint count;
+	int is_visbuffer;
 };
 
 [shader("compute")]
@@ -42,7 +43,14 @@ void computeMain(uint DTid: SV_DispatchThreadID, uniform CSInput input)
 	cmd.instance_count = 1u;
 	cmd.index_offset = cluster.index_offset;
 	cmd.vertex_offset = cluster.vertex_offset;
-	cmd.instance_id = DTid;
+	if(input.is_visbuffer == 1)
+	{
+		cmd.instance_id = DTid;
+	}
+	else
+	{
+		cmd.instance_id = instance.object - 1;
+	}
 
 	input.commands[input.visibility_prefixsum[DTid] + bOffset - 1] = cmd;
 }

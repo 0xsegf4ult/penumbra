@@ -20,9 +20,12 @@ enum GPUFormat { GPU_FORMAT_UNDEFINED, GPU_FORMAT_R8_UNORM, GPU_FORMAT_RG8_UNORM
 		GPU_FORMAT_BC5_UNORM, GPU_FORMAT_BC6H_UFLOAT, GPU_FORMAT_BC7_UNORM, GPU_FORMAT_BC7_SRGB };
 enum GPUTextureLayout { GPU_TEXTURE_LAYOUT_UNDEFINED, GPU_TEXTURE_LAYOUT_GENERAL, GPU_TEXTURE_LAYOUT_PRESENT };
 enum GPUFilter { GPU_FILTER_NEAREST, GPU_FILTER_LINEAR };
-enum GPUAddressMode { GPU_ADDRESS_MODE_REPEAT, GPU_ADDRESS_MODE_MIRRORED_REPEAT, GPU_ADDRESS_MODE_CLAMP_TO_EDGE };
-enum GPUOp { GPU_OP_NEVER, GPU_OP_LESS, GPU_OP_EQUAL, GPU_OP_LESS_EQUAL,
-	     GPU_OP_GREATER, GPU_OP_NOT_EQUAL, GPU_OP_GREATER_EQUAL, GPU_OP_ALWAYS };
+enum GPUAddressMode { GPU_ADDRESS_MODE_REPEAT, GPU_ADDRESS_MODE_MIRRORED_REPEAT, GPU_ADDRESS_MODE_CLAMP_TO_EDGE, GPU_ADDRESS_MODE_CLAMP_TO_BORDER };
+enum GPUCompareOp { GPU_COMPARE_OP_NONE, 
+		    GPU_COMPARE_OP_NEVER, GPU_COMPARE_OP_LESS, 
+		    GPU_COMPARE_OP_EQUAL, GPU_COMPARE_OP_LESS_EQUAL, 
+		    GPU_COMPARE_OP_GREATER, GPU_COMPARE_OP_NOT_EQUAL, 
+		    GPU_COMPARE_OP_GREATER_EQUAL, GPU_COMPARE_OP_ALWAYS };
 enum GPUBlendOP { GPU_BLEND_OP_ADD, GPU_BLEND_OP_SUBTRACT, GPU_BLEND_OP_REV_SUBTRACT,
 		  GPU_BLEND_OP_MIN, GPU_BLEND_OP_MAX };
 enum GPUBlendFactor { GPU_BLEND_FACTOR_ZERO, GPU_BLEND_FACTOR_ONE, GPU_BLEND_FACTOR_SRC_COLOR,
@@ -68,10 +71,11 @@ enum GPUStage : uint32_t
 	GPU_STAGE_TRANSFER = 0x1,
 	GPU_STAGE_COMMAND_PROCESSOR = 0x2,	
 	GPU_STAGE_COMPUTE = 0x4,
-	GPU_STAGE_RASTER_OUTPUT = 0x8,
-	GPU_STAGE_FRAGMENT_SHADER = 0x10,
-	GPU_STAGE_VERTEX_SHADER = 0x20,
-	GPU_STAGE_ALL = 0x40
+	GPU_STAGE_RASTER_COLOR_OUTPUT = 0x8,
+	GPU_STAGE_RASTER_DEPTH_OUTPUT = 0x10,
+	GPU_STAGE_FRAGMENT_SHADER = 0x20,
+	GPU_STAGE_VERTEX_SHADER = 0x40,
+	GPU_STAGE_ALL = 0x80
 };
 
 enum GPUHazard : uint32_t
@@ -142,6 +146,7 @@ struct GPUSamplerDesc
 	GPUAddressMode address_mode_u;
 	GPUAddressMode address_mode_v;
 	GPUAddressMode address_mode_w;
+	GPUCompareOp compare_op{GPU_COMPARE_OP_NONE};
 	float max_anisotropy{0.0f};
 };
 
@@ -159,7 +164,7 @@ struct GPUPipeline
 struct GPUDepthStencilDesc
 {
 	GPUDepthMode depth_mode{};
-	GPUOp depth_test{GPU_OP_ALWAYS};
+	GPUCompareOp depth_test{GPU_COMPARE_OP_ALWAYS};
 };
 
 struct GPUBlendDesc
@@ -228,7 +233,7 @@ struct GPUIndirectCommand
 
 struct GPUProperties
 {
-	std::string_view device_name;
+	std::string device_name;
 };
 
 bool gpu_init();
@@ -280,7 +285,7 @@ void gpu_begin_renderpass(const GPUCommandBuffer& cmd, const GPURenderPassDesc& 
 void gpu_end_renderpass(const GPUCommandBuffer& cmd);
 
 void gpu_set_scissor(const GPUCommandBuffer& cmd, uvec4 scissor);
-void gpu_set_cull_mode(const GPUCommandBuffer& cmd, GPUCullMode mode);
+void gpu_set_cullmode(const GPUCommandBuffer& cmd, GPUCullMode mode);
 void gpu_bind_index_buffer(const GPUCommandBuffer& cmd, const GPUPointer& buffer, GPUIndexType type);
 
 void gpu_draw(const GPUCommandBuffer& cmd, void* data, uint32_t vertex_count, uint32_t instance_count, uint32_t base_vertex, uint32_t base_instance);

@@ -30,10 +30,63 @@ float4 screen_to_view(float4 screen)
 	return clip_to_view(clip);
 }
 
-float3 calculate_direct_lighting(float3 N, float3 V, float NdotV, float3 diffuse, float roughness, float3 f0)
+float3 decompress_bc5n(float2 bc5n)
 {
+	return float3(bc5n, sqrt(max(1.0 - dot(bc5n, bc5n), 0.0)));
+}
+
+static const float2 poissonDisk[16] = {
+        float2(-0.94201624, -0.39906216),
+        float2(0.94558609, -0.76890725),
+        float2(-0.094184101, -0.92938870),
+        float2(0.34495938, 0.29387760),
+        float2(-0.91588581, 0.45771432),
+        float2(-0.81544232, -0.87912464),
+        float2(-0.38277543, 0.27676845),
+        float2(0.97484398, 0.75648379),
+        float2(0.44323325, -0.97511554),
+        float2(0.53742981, -0.47373420),
+        float2(-0.26496911, -0.41893023),
+        float2(-0.79197514, 0.19090188),
+        float2(-0.24188840, 0.99706507),
+        float2(-0.81409955, 0.91437590),
+        float2(0.19984126, 0.78641367),
+        float2(0.14383161, -0.14100790)
+};
+
+float filterPCF(uint sm_index, float4 posLS)
+{
+	ResourceHandle<SamplerComparisonState> sm_shadow = {2u};
+	float dx = consts.csm_scale * (0.25 * (4 - sm_index));
+	float factor = 0.0;
+
+	float3 ndc = posLS.xyz / posLS.w;
+	float2 textureUV = float2(ndc.x, ndc.y) * 0.5 + 0.5;
+	
+	for(int i = 0; i < 16; i++)
+	{
+		factor += consts.cascade_rts[sm_index].desc.SampleCmpLevelZero(sm_shadow.desc, textureUV + poissonDisk[i] * float2(dx, dx), ndc.z - consts.csm_cbias);
+	}
+
+	return factor * 0.0625;
+}
+
+float3 calculate_direct_lighting(float3 N, float3 V, float NdotV, float3 diffuse, float roughness, float3 f0, float3 wpos, float3 in_normal, float depth)
+{
+	float shadow = 1.0;
+	uint cascadeIndex = 0;
+	for(uint i = 0; i < 3; i++)
+	{
+		if(depth < consts.cascade_splits[i])
+			cascadeIndex = i + 1;
+	}
+
 	float3 L = normalize(-consts.light_direction.xyz);
 	float NdotL = saturate(dot(N, L));
+	float4 sm_samplePos = float4(wpos, 1.0) + (float4(in_normal, 0.0) * dot(in_normal, L) * consts.csm_nbias);
+	if(NdotL > 0.01)
+		shadow = lerp(0.0, 1.0, filterPCF(cascadeIndex, mul(sm_samplePos, consts.smap_data[cascadeIndex])));
+
 	float3 H = normalize(V + L);
 	float NdotH = dot(N, H);
 	
@@ -46,7 +99,7 @@ float3 calculate_direct_lighting(float3 N, float3 V, float NdotV, float3 diffuse
 
 	float3 luminance = consts.light_color.rgb * NdotL;
 	float3 l0 = (diffuse + specular_contrib) * luminance;
-	return l0;
+	return shadow * l0;
 } 
 
 [shader("compute")]
@@ -69,7 +122,7 @@ void computeMain(uint groupIndex : SV_GroupIndex, uint2 Gid : SV_GroupID, unifor
 	ResourceHandle<SamplerState> smp = {0u};
 	if(primitiveID == 0)
 	{
-		input.framebuffer.desc[pixel] = consts.prefiltered.desc.SampleLevel(smp.desc, ray_direction, 0) * consts.exposure * 1200.0;
+		input.framebuffer.desc[pixel] = consts.prefiltered.desc.SampleLevel(smp.desc, ray_direction, 0) * consts.exposure * consts.ambient_factor;
 	}
 
 	float3 p0;
@@ -150,7 +203,25 @@ void computeMain(uint groupIndex : SV_GroupIndex, uint2 Gid : SV_GroupID, unifor
 	float3 albedo = (mtl.albedo.valid() ? mtl.albedo.desc.SampleGrad(smp_aniso.desc, uvs, uv_dx, uv_dy).xyz : float3(1.0)) * mtl.diffuse_factor.xyz;
 	float3 emissive = (mtl.emissive.valid() ? mtl.emissive.desc.SampleGrad(smp_aniso.desc, uvs, uv_dx, uv_dy).xyz : float3(1.0)) * mtl.emissive_factor.xyz;
 	float3 physical = mtl.mro.valid() ? mtl.mro.desc.SampleGrad(smp_aniso.desc, uvs, uv_dx, uv_dy).xyz : float3(1.0, 1.0, 0.0);
-	
+
+	if(mtl.normalmap.valid() && dot(V, V) < 1000)
+	{
+		float2 normalmap = mtl.normalmap.desc.SampleGrad(smp_aniso.desc, uvs, uv_dx, uv_dy).xy;
+		
+		float4 tan0_raw = decode_tangent(n0_raw, asfloat(vn0.y));
+		float4 tan1_raw = decode_tangent(n1_raw, asfloat(vn1.y));
+		float4 tan2_raw = decode_tangent(n2_raw, asfloat(vn2.y));
+
+		float4 tan0 = float4(normalize(mul(tan0_raw.xyz, trs_invT)), tan0_raw.w);
+		float4 tan1 = float4(normalize(mul(tan1_raw.xyz, trs_invT)), tan1_raw.w);
+		float4 tan2 = float4(normalize(mul(tan2_raw.xyz, trs_invT)), tan2_raw.w);
+		float4 tangent = attribute_at_bary(tan0, tan1, tan2, bary);
+
+		float3 bitangent = tangent.w * cross(tangent.xyz, normal_raw);
+		float3 nmap_val = decompress_bc5n((normalmap * 2.0 - 1.0) * mtl.normal_factor * 0.33);
+		N = normalize(mul(nmap_val, float3x3(tangent.xyz, bitangent, normal_raw)));
+	}
+
 	if(is_backface)
 		N = -N;
 
@@ -160,7 +231,7 @@ void computeMain(uint groupIndex : SV_GroupIndex, uint2 Gid : SV_GroupID, unifor
 	float NdotV = dot(N, V);
 	N += (2.0 * saturate(-NdotV)) * V;
 
-	float3 amb_IRR = consts.irradiance.desc.SampleLevel(smp.desc, N, 0) * 1200.0;
+	float3 amb_IRR = consts.irradiance.desc.SampleLevel(smp.desc, N, 0) * consts.ambient_factor;
 
 	NdotV = dot(N, V);
 
@@ -174,10 +245,10 @@ void computeMain(uint groupIndex : SV_GroupIndex, uint2 Gid : SV_GroupID, unifor
 	float2 envBRDF = consts.brdf.desc.SampleLevel(smp.desc, float2(max(NdotV, 0.0), roughness), 0);
 
 	float3 reflection = reflect(-V, N);
-	float3 amb_PFC = consts.prefiltered.desc.SampleLevel(smp.desc, reflection, roughness * 8.0) * 1200.0;
+	float3 amb_PFC = consts.prefiltered.desc.SampleLevel(smp.desc, reflection, roughness * 8.0) * consts.ambient_factor;
 
 	roughness = max(roughness, 0.045);
-	l0 += calculate_direct_lighting(N, V, NdotV, diffuse, roughness, f0);
+	l0 += calculate_direct_lighting(N, V, NdotV, diffuse, roughness, f0, p, normalize(normal_raw), tmp.z);
 
 	float horizon = min(1.0 + dot(reflection, N), 1.0);
 	float3 amb_SPEC = amb_PFC * (f0 * envBRDF.x + f90 * envBRDF.y) * horizon * horizon;

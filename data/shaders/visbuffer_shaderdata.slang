@@ -19,8 +19,16 @@ struct VisbufferConstants
 	float4 light_color;
 
 	float exposure;
+	float ambient_factor;
 	ResourceHandle<Texture2D<float2>> brdf;
 	ResourceHandle<TextureCube<float3>> irradiance;
 	ResourceHandle<TextureCube<float3>> prefiltered;
+	
+	float csm_cbias;
+	float csm_nbias;
+	float csm_scale;
+	
+	float cascade_splits[4];
+	ResourceHandle<Texture2D> cascade_rts[4];
+	Ptr<float4x4, Access.Read> smap_data;
 };
-

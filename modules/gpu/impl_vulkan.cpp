@@ -263,6 +263,8 @@ constexpr VkSamplerAddressMode address_mode_to_vk(GPUAddressMode mode)
 		return VK_SAMPLER_ADDRESS_MODE_MIRRORED_REPEAT;
 	case GPU_ADDRESS_MODE_CLAMP_TO_EDGE:
 		return VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+	case GPU_ADDRESS_MODE_CLAMP_TO_BORDER:
+		return VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
 	default:
 		std::unreachable();
 	}
@@ -278,8 +280,10 @@ constexpr VkPipelineStageFlags2 gpu_stage_to_vk(GPUStage stage)
 		res |= VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT;
 	if(stage & GPU_STAGE_COMPUTE)
 		res |= VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
-	if(stage & GPU_STAGE_RASTER_OUTPUT)
+	if(stage & GPU_STAGE_RASTER_COLOR_OUTPUT)
 		res |= VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
+	if(stage & GPU_STAGE_RASTER_DEPTH_OUTPUT)
+		res |= (VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT);
 	if(stage & GPU_STAGE_FRAGMENT_SHADER)
 		res |= VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
 	if(stage & GPU_STAGE_VERTEX_SHADER)
@@ -427,25 +431,26 @@ constexpr VkImageLayout texlayout_to_vk(GPUTextureLayout layout)
 	}
 }
 
-constexpr VkCompareOp depth_test_to_vk(GPUOp op)
+constexpr VkCompareOp compare_op_to_vk(GPUCompareOp op)
 {
 	switch(op)
 	{
-	case GPU_OP_NEVER:
+	case GPU_COMPARE_OP_NEVER:
 		return VK_COMPARE_OP_NEVER;
-	case GPU_OP_LESS:
+	case GPU_COMPARE_OP_LESS:
 		return VK_COMPARE_OP_LESS;
-	case GPU_OP_EQUAL:
+	case GPU_COMPARE_OP_EQUAL:
 		return VK_COMPARE_OP_EQUAL;
-	case GPU_OP_LESS_EQUAL:
+	case GPU_COMPARE_OP_LESS_EQUAL:
 		return VK_COMPARE_OP_LESS_OR_EQUAL;
-	case GPU_OP_GREATER:
+	case GPU_COMPARE_OP_GREATER:
 		return VK_COMPARE_OP_GREATER;
-	case GPU_OP_NOT_EQUAL:
+	case GPU_COMPARE_OP_NOT_EQUAL:
 		return VK_COMPARE_OP_NOT_EQUAL;
-	case GPU_OP_GREATER_EQUAL:
+	case GPU_COMPARE_OP_GREATER_EQUAL:
 		return VK_COMPARE_OP_GREATER_OR_EQUAL;
-	case GPU_OP_ALWAYS:
+	case GPU_COMPARE_OP_ALWAYS:
+	case GPU_COMPARE_OP_NONE:
 		return VK_COMPARE_OP_ALWAYS;
 	default:
 		std::unreachable();
@@ -834,7 +839,7 @@ bool vulkan_create_device(std::span<VkPhysicalDevice> phys_devices, int index = 
 	vkGetPhysicalDeviceProperties2(gpu_context->phys_device, &props);
 
 	log::info("gpu_vulkan: selected render device {}", std::string_view{props.properties.deviceName});
-	gpu_context->props.device_name = std::string_view{props.properties.deviceName};
+	gpu_context->props.device_name = std::string{props.properties.deviceName};
 	auto queue_ci = vulkan_device_create_queues();
 
 	VkPhysicalDeviceExtendedDynamicState3FeaturesEXT ds3ext
@@ -1604,11 +1609,11 @@ GPUSampler gpu_create_sampler(const GPUSamplerDesc& desc)
 		.mipLodBias = 0.0f,
 		.anisotropyEnable = (desc.max_anisotropy == 0.0f) ? false : true,
 		.maxAnisotropy = desc.max_anisotropy,
-		.compareEnable = false,
-		.compareOp = VK_COMPARE_OP_ALWAYS,
+		.compareEnable = (desc.compare_op != GPU_COMPARE_OP_NONE),
+		.compareOp = compare_op_to_vk(desc.compare_op),
 		.minLod = 0.0f,
 		.maxLod = VK_LOD_CLAMP_NONE,
-		.borderColor = VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK,
+		.borderColor = VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE,
 		.unnormalizedCoordinates = false
 	};
 
@@ -2391,7 +2396,7 @@ void gpu_set_depth_stencil_state(const GPUCommandBuffer& cmd, const GPUDepthSten
 	assert(cmd.bound_pipe);
 	auto cb = std::bit_cast<VkCommandBuffer>(cmd.handle);
 
-	vkCmdSetDepthCompareOp(cb, depth_test_to_vk(state.depth_test));
+	vkCmdSetDepthCompareOp(cb, compare_op_to_vk(state.depth_test));
         vkCmdSetDepthTestEnable(cb, state.depth_mode > 0);
         vkCmdSetDepthWriteEnable(cb, (state.depth_mode & GPU_DEPTH_WRITE) ? true : false);
         vkCmdSetDepthClampEnableEXT(cb, (state.depth_mode & GPU_DEPTH_CLAMP) ? true : false);
@@ -2598,7 +2603,7 @@ void gpu_set_scissor(const GPUCommandBuffer& cmd, uvec4 scissor)
 	vkCmdSetScissor(std::bit_cast<VkCommandBuffer>(cmd.handle), 0u, 1u, &vkscissor);
 }
 
-void gpu_set_cull_mode(const GPUCommandBuffer& cmd, GPUCullMode mode)
+void gpu_set_cullmode(const GPUCommandBuffer& cmd, GPUCullMode mode)
 {
 	vkCmdSetCullMode(std::bit_cast<VkCommandBuffer>(cmd.handle), raster_cullmode_to_vk(mode)); 
 }

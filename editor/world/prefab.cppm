@@ -14,6 +14,14 @@ using std::uint32_t;
 namespace penumbra
 {
 
+enum PrefabMeshFlags
+{
+	PREFAB_MESH_NO_SHADOWCAST = 0x1, 
+	PREFAB_MESH_NO_SHADOWCAST_C1 = 0x2,
+	PREFAB_MESH_NO_SHADOWCAST_C2 = 0x4,
+	PREFAB_MESH_NO_SHADOWCAST_C3 = 0x8
+};
+
 struct PrefabFileFormat
 {
 	constexpr static uint32_t fmt_magic = 0x4246504c;
@@ -212,6 +220,16 @@ export void load_prefab(WorldState& world, const vfs::path& path)
 					}
 				}
 
+				uint32_t shadow_levels = 4;
+				if(smc->flags & PREFAB_MESH_NO_SHADOWCAST_C3)
+					shadow_levels = 3;
+				if(smc->flags & PREFAB_MESH_NO_SHADOWCAST_C2)
+					shadow_levels = 2;
+				if(smc->flags & PREFAB_MESH_NO_SHADOWCAST_C1)
+					shadow_levels = 1;
+				if(smc->flags & PREFAB_MESH_NO_SHADOWCAST)
+					shadow_levels = 0;
+
 				auto& geom_data = resource_manager_get_geometry(geom);
 				auto rd_object = renderer_world_insert_object
 				({
@@ -222,7 +240,7 @@ export void load_prefab(WorldState& world, const vfs::path& path)
 					geom_data.l0_cluster_count,
 					geom_data.lod_offset,
 					geom_data.lod_count
-				});
+				}, shadow_levels);
 
 				graph.emplace<render_object_component>(node_ent, geom, material, rd_object);
 				

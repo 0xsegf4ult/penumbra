@@ -21,7 +21,10 @@ void draw_device_overlay(uvec2 root = {0u, 0u})
 	ImGui::Begin("device_overlay", &p_open, wflags);
 
 	ImGui::Text("penumbra git-%s", config::git_hash);
-	
+
+	const auto& gpu_props = gpu_get_properties();
+	ImGui::Text("%s", gpu_props.device_name.c_str());
+
 	ImColor fps_color = ImColor(20, 220, 20, 255);
 	if(fps < 45.0f)
 		fps_color = ImColor(220, 20, 20, 255);

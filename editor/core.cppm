@@ -123,7 +123,7 @@ private:
 		framebuffer = gpu_texture_view_descriptor(framebuffer_tex, {.format = GPU_FORMAT_RGBA8_SRGB});
 
 		auto cmd = gpu_record_commands(GPU_QUEUE_GRAPHICS);
-		gpu_texture_layout_transition(cmd, framebuffer_tex, GPU_STAGE_NONE, GPU_STAGE_RASTER_OUTPUT, GPU_TEXTURE_LAYOUT_UNDEFINED, GPU_TEXTURE_LAYOUT_GENERAL);
+		gpu_texture_layout_transition(cmd, framebuffer_tex, GPU_STAGE_NONE, GPU_STAGE_RASTER_COLOR_OUTPUT, GPU_TEXTURE_LAYOUT_UNDEFINED, GPU_TEXTURE_LAYOUT_GENERAL);
 		gpu_submit(GPU_QUEUE_GRAPHICS, cmd);
 	}
 
@@ -131,31 +131,33 @@ private:
 	{
 		auto& camera_transform = world->entities.get<Transform>(world->main_camera);
 		auto& camera = world->entities.get<camera_component>(world->main_camera);
-		auto matrix = camera_transform.as_matrix();
 		auto res = renderer_get_render_resolution();
 
 		const float near = camera.near_plane;
-
-		mat4 view = mat4::make_translation(-camera_transform.translation) * Quaternion::make_mat4(~camera_transform.rotation);
-
-		mat4 proj;
 
 		const float focal_length = 1.0f / std::tan(to_radians(camera.vertical_fov) / 2.0f);
 		const float aspect_ratio = static_cast<float>(res.w) / static_cast<float>(res.h);
 		const float x = focal_length / aspect_ratio;
 		const float y = -focal_length;
 
-		proj =
+		RenderCameraData cam_data
 		{
-			vec4{x,	    0.0f,  0.0f,  0.0f},
-			vec4{0.0f,     y,  0.0f,  0.0f},
-			vec4{0.0f,  0.0f,  0.0f, -1.0f},
-			vec4{0.0f,  0.0f,  near,  0.0f}
+			.view = mat4::make_translation(-camera_transform.translation) * Quaternion::make_mat4(~camera_transform.rotation),
+			.proj = 
+			{
+				vec4{x,	    0.0f,  0.0f,  0.0f},
+				vec4{0.0f,     y,  0.0f,  0.0f},
+				vec4{0.0f,  0.0f,  0.0f, -1.0f},
+				vec4{0.0f,  0.0f,  near,  0.0f}
+			},
+			.position = camera_transform.translation,
+			.znear = near,
+			.zfar = camera.far_plane,
+			.exposure = camera.get_exposure()
 		};
 
-
-		renderer_update_camera(view, proj, camera_transform.translation, camera.get_exposure());
-		widget_viewport->update_camera(view, proj);
+		renderer_update_camera(cam_data);
+		widget_viewport->update_camera(cam_data.view, cam_data.proj);
 	}
 
 
