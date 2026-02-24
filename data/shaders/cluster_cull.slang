@@ -51,7 +51,7 @@ void computeMain(uint DTid: SV_DispatchThreadID, uniform CSInput input)
 	Ptr<ObjectData, Access.Read> object = input.objects + (instance.object - 1);
 	Ptr<GeometryCluster, Access.Read> cluster = input.clusters + instance.cluster;
 	float4 center = mul(float4(cluster->sphere.xyz, 1.0), object->transform);
-	float radius = cluster->sphere.w;
+	float radius = cluster->sphere.w * object->cull_scale;
 	float3 cone_axis = mul(cluster.cone.xyz, float3x3(object->transform));
 
 	if(is_visible(center, radius, cone_axis, cluster.cone.w))

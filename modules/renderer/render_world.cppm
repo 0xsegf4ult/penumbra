@@ -16,6 +16,13 @@ using std::uint32_t;
 namespace penumbra
 {
 
+enum RenderViewFlags
+{
+	RENDER_VIEW_FRUSTUM_CULL = 0x1,
+	RENDER_VIEW_OCCLUSION_CULL = 0x2,
+	RENDER_VIEW_ORTHOGRAPHIC = 0x4
+};
+
 struct RenderViewCBuffer
 {
 	mat4 viewmat;
@@ -25,7 +32,8 @@ struct RenderViewCBuffer
 	float lod_step;
 	float znear;
 	float zfar;
-	uint32_t flags;	
+	uint32_t flags;
+	uint32_t lod_bias;	
 };
 
 struct RenderViewData
@@ -45,12 +53,17 @@ struct RenderViewData
 	std::vector<uint32_t> cluster_bucket_sizes;
 	std::vector<uint32_t> cluster_bucket_offsets;
 	bool is_shadow;
+
+	bool freeze_culling{false};
+	uint32_t flags;
+	uint32_t lod_bias;
 };
 
 struct RenderObjectData
 {
 	mat4 transform;
 	vec4 sphere;
+	float cull_scale;
 	uint32_t material_offset;
 	uint32_t geom_lod_offset;
 	uint32_t pack_bucket_lod_count;
@@ -126,6 +139,8 @@ public:
 		view.visibility_sums.push_back(gpu_allocate_memory(sizeof(uint32_t)));
 		view.is_shadow = is_shadow;
 
+		view.flags = RENDER_VIEW_FRUSTUM_CULL;
+
 		return RenderView{static_cast<uint32_t>(views.size())};
 	}
 
@@ -134,6 +149,9 @@ public:
 		assert(render_view);
 		
 		auto& rv = views[render_view - 1];
+		if(rv.freeze_culling)
+			return;
+
 		auto* cbuffer = reinterpret_cast<RenderViewCBuffer*>(gpu_map_memory(rv.cbuffer[renderer_gfx_frame_index()]));
 		cbuffer->viewmat = cam.view;
 		cbuffer->cam_pos = vec4{cam.position, 1.0f};
@@ -170,6 +188,7 @@ public:
 
 		obj->transform = data.transform.as_matrix();
 		obj->sphere = data.sphere;
+		obj->cull_scale = std::max(std::max(std::abs(data.transform.scale.x), std::abs(data.transform.scale.y)), std::abs(data.transform.scale.z)); 
 		obj->material_offset = data.material_offset;
 		obj->geom_lod_offset = data.geom_lod_offset;
 		obj->pack_bucket_lod_count = (data.bucket << 16) | data.geom_lod_count;
@@ -246,14 +265,16 @@ public:
 			cbuffer->lod_base = 10.0f;
 			if(view.is_shadow)
 			{
-				cbuffer->flags = 5;
+				cbuffer->flags = view.flags | RENDER_VIEW_ORTHOGRAPHIC;
 				cbuffer->lod_step = 1.5f;
 			}
 			else
 			{
-				cbuffer->flags = 1;
+				cbuffer->flags = view.flags;
 				cbuffer->lod_step = 3.5f;
 			}
+			cbuffer->lod_bias = view.lod_bias;
+	
 
 			for(int i = 0; i < RENDER_BUCKET_COUNT; i++)
 			{

@@ -49,7 +49,7 @@ void computeMain(uint DTid: SV_DispatchThreadID, uniform CSInput input)
 
 	Ptr<ObjectData, Access.Read> object = input.objects + (instance.input_offset - 1);
 	float4 center = mul(float4(object->sphere.xyz, 1.0), object->transform);
-	float radius = object->sphere.w;
+	float radius = object->sphere.w * object->cull_scale;
 
 	uint lod_count = object->pack_bucket_lcount & 0xFFFF;
 	uint bucket = object->pack_bucket_lcount >> 16;
@@ -57,7 +57,7 @@ void computeMain(uint DTid: SV_DispatchThreadID, uniform CSInput input)
 
 	float dist = distance(center.xyz, culling_data.cam_pos.xyz);
 	uint lodIndex = uint(max(1.0 + log(dist / culling_data.lod_base) / log(culling_data.lod_step), 0.0));
-	lodIndex = min(lodIndex, lod_count - 1);
+	lodIndex = min(lodIndex + culling_data.lod_bias, lod_count - 1);
 
 	GeometryLOD lod = input.lods[object->lod_offset + lodIndex];
 

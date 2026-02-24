@@ -4,6 +4,7 @@ struct ObjectData
 {
 	float4x4 transform;
 	float4 sphere;
+	float cull_scale;
 	uint material_offset;
 	uint lod_offset;
 	uint pack_bucket_lcount;
@@ -70,6 +71,7 @@ struct CullingData
 	float lod_step;
 	float znear;
 	float zfar;
-	CullingFlags flags;	
+	CullingFlags flags;
+	uint lod_bias;	
 };
 
