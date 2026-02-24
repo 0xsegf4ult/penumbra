@@ -121,9 +121,11 @@ struct renderer_context_t
 	GPUPipeline visbuffer_build_pso;
 	GPUPipeline visbuffer_build_alphamask_pso;
 	GPUPipeline vb_resolve_cs;
+	GPUPipeline vb_visualize_cs;
 	GPUPipeline hdr_compose_pso;
 	GPUPipeline brdflut_pso;
 
+	bool vb_debug{false}; 
 	std::vector<visbuffer_read_hook> visbuffer_read_hooks;
 	
 	GPUTexture brdflut_tex;
@@ -321,6 +323,7 @@ void renderer_init(Window& wnd)
 	});
 
 	renderer->vb_resolve_cs = gpu_create_compute_pipeline(load_shader("shaders/visbuffer_resolve"));
+	renderer->vb_visualize_cs = gpu_create_compute_pipeline(load_shader("shaders/visbuffer_visualize"));
 
 	renderer->hdr_compose_pso = gpu_create_graphics_pipeline(load_shader("shaders/hdr_compose"),
 	{
@@ -357,6 +360,7 @@ void renderer_shutdown()
 
 	gpu_destroy_pipeline(renderer->brdflut_pso);
 	gpu_destroy_pipeline(renderer->hdr_compose_pso);
+	gpu_destroy_pipeline(renderer->vb_visualize_cs);
 	gpu_destroy_pipeline(renderer->vb_resolve_cs);
 	gpu_destroy_pipeline(renderer->visbuffer_build_alphamask_pso);
 	gpu_destroy_pipeline(renderer->visbuffer_build_pso);
@@ -526,6 +530,27 @@ void renderer_build_visbuffer(GPUCommandBuffer& cmd)
 	gpu_draw_indexed_indirect_count(cmd, &am_shader_data, alphamask_draw_data.commands, alphamask_draw_data.counter, alphamask_draw_data.max_instance_count);
 
 	gpu_end_renderpass(cmd);
+}
+
+void renderer_visualize_visbuffer(GPUCommandBuffer& cmd)
+{
+	gpu_set_pipeline(cmd, renderer->vb_visualize_cs);
+
+	auto draw_data = renderer_world_get_bucket(renderer->camera_view, RENDER_BUCKET_DEFAULT);
+	struct VBVisData
+	{
+		GPUDevicePointer instances;
+		uvec2 res;
+		uint32_t visbuffer;
+		uint32_t output;
+	} shader_data;
+	shader_data.instances = gpu_host_to_device_pointer(draw_data.instances);
+	shader_data.res = renderer->render_resolution;
+	shader_data.visbuffer = renderer->visbuffer.handle;
+	shader_data.output = renderer->hdrbuffer_rw.handle;
+	gpu_dispatch(cmd, &shader_data, {(renderer->render_resolution.x + 7u) / 8u, (renderer->render_resolution.y + 7u) / 8u, 1u});
+
+	gpu_barrier(cmd, GPU_STAGE_COMPUTE, GPU_STAGE_FRAGMENT_SHADER);
 }
 
 void renderer_resolve_visbuffer(GPUCommandBuffer& cmd)
@@ -789,7 +814,10 @@ void renderer_process_frame(double dt)
 	for(auto& hook : renderer->visbuffer_read_hooks)
 		hook(cmd, {&renderer->visbuffer, gpu_host_to_device_pointer(draw_data.instances), renderer->render_world.get_objects(), renderer->render_resolution}, renderer->frame_index);
 
-	renderer_resolve_visbuffer(cmd);
+	if(!renderer->vb_debug)
+		renderer_resolve_visbuffer(cmd);
+	else
+		renderer_visualize_visbuffer(cmd);
 
 	struct HDRComposeData
 	{
@@ -986,7 +1014,7 @@ void renderer_imgui_panel()
 	ImGui::Begin("Renderer");
 	ImGui::Combo("Tonemapper", &renderer->tonemapper, "ACES\0AGX\0\0");
 	ImGui::DragFloat("CSM lambda", &renderer->csm_lambda, 0.01f, 0.0f, 2.0f);
-
+	ImGui::Checkbox("Visbuffer debug view", &renderer->vb_debug);
 	ImGui::Separator();
 
 	ImGui::Text("Camera");
