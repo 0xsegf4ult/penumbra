@@ -11,6 +11,8 @@ import penumbra.math;
 import penumbra.gpu;
 import std;
 
+import imgui;
+
 using std::uint32_t;
 
 namespace penumbra
@@ -408,7 +410,32 @@ public:
 			view.clusters,
 			view.cluster_bucket_sizes[bucket]
 		};
-	}		
+	}
+
+	void imgui_debug_panel(RenderView handle)
+	{
+		assert(handle);
+		ImGui::PushID(handle);
+		auto& view = views[handle - 1];
+
+		ImGui::Checkbox("Freeze culling", &view.freeze_culling);
+
+		uint32_t flags = view.flags;
+
+		bool frc = flags & RENDER_VIEW_FRUSTUM_CULL;
+		ImGui::Checkbox("Frustum culling", &frc);
+
+		uint32_t newflags = 0;
+		if(frc)
+			newflags |= RENDER_VIEW_FRUSTUM_CULL;
+
+		view.flags = newflags;
+
+		uint32_t min = 0u;
+		uint32_t max = 8u;
+		ImGui::SliderScalar("LOD bias", ImGuiDataType_U32, &view.lod_bias, &min, &max);
+		ImGui::PopID();
+	}	
 private:
 	void compact_drawcalls(GPUCommandBuffer& cmd)
 	{

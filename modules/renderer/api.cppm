@@ -55,6 +55,13 @@ export struct RenderCameraData
 	float exposure{1.0f};
 };
 
+export struct RenderEnvironmentData
+{
+	vec3 light_direction;
+	vec3 light_color;
+	float light_intensity;
+};
+
 export struct VisbufferInfo
 {
 	GPUTextureDescriptor* texture;
@@ -81,7 +88,9 @@ export void renderer_set_output_rendertarget(GPUTexture rt);
 export uvec2 renderer_get_render_resolution();
 export void renderer_update_render_resolution(uvec2 res);
 export void renderer_update_camera(const RenderCameraData& camera);
+export void renderer_update_environment(const RenderEnvironmentData& env);
 export void renderer_add_visbuffer_hook(visbuffer_read_hook&& hook); 
 export void renderer_set_envmap(const RenderEnvironmentMap& envmap);
+export void renderer_imgui_panel();
 
 }

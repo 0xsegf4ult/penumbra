@@ -77,6 +77,7 @@ public:
 		update_main_camera();
 		widget_viewport->update_render_target(&framebuffer);
 		renderer_set_output_rendertarget(framebuffer_tex);
+		update_env();
 	}
 
 	void draw_ui()
@@ -106,6 +107,7 @@ public:
 		ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), ImGuiDockNodeFlags_None);
 
 		menubar_draw();
+		renderer_imgui_panel();
 		for(auto& widget : widgets)
 			widget->draw();
 
@@ -160,6 +162,16 @@ private:
 		widget_viewport->update_camera(cam_data.view, cam_data.proj);
 	}
 
+	void update_env()
+	{
+		auto dlight = world->entities.get<directional_light_component>(world->env);
+		renderer_update_environment
+		({
+			dlight.direction,
+			dlight.color,
+			dlight.intensity
+		});
+	}
 
 	void menubar_draw()
 	{

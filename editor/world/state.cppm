@@ -1,5 +1,6 @@
 export module penumbra.editor:world_state;
 import :camera_component;
+import :light_components;
 
 import penumbra.ecs;
 import penumbra.math;
@@ -56,6 +57,7 @@ export struct WorldState
 
 		env = spawn("env");
 		add_entity_as_child(entities, root, env);
+		entities.emplace<directional_light_component>(env, vec3{-0.14f, -0.3f, -0.3f}, vec3{0.68f, 0.53f, 0.46f}, 38000.0f);
 	}
 
 	ecs::entity spawn(std::string_view name)

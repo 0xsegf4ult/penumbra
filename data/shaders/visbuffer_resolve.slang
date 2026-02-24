@@ -57,7 +57,7 @@ static const float2 poissonDisk[16] = {
 float filterPCF(uint sm_index, float4 posLS)
 {
 	ResourceHandle<SamplerComparisonState> sm_shadow = {2u};
-	float dx = consts.csm_scale * (0.25 * (4 - sm_index));
+	float dx = consts.csm_scale * (0.25 * (3 - sm_index));
 	float factor = 0.0;
 
 	float3 ndc = posLS.xyz / posLS.w;
@@ -75,7 +75,7 @@ float3 calculate_direct_lighting(float3 N, float3 V, float NdotV, float3 diffuse
 {
 	float shadow = 1.0;
 	uint cascadeIndex = 0;
-	for(uint i = 0; i < 3; i++)
+	for(uint i = 0; i < 2; i++)
 	{
 		if(depth < consts.cascade_splits[i])
 			cascadeIndex = i + 1;

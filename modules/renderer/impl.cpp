@@ -11,7 +11,7 @@ import :material;
 import penumbra.core;
 import penumbra.gpu;
 import penumbra.ui;
-
+import imgui;
 import std;
 using std::uint64_t, std::size_t;
 
@@ -129,11 +129,14 @@ struct renderer_context_t
 	GPUTexture brdflut_tex;
 	GPUTextureDescriptor brdflut;
 
+	vec3 light_direction;
+	vec3 light_color;
 	RenderEnvironmentMap envmap;
 
 	GPUPipeline shadowmap_opaque_pso;
 	GPUPipeline shadowmap_alphamask_pso;
 
+	uint32_t csm_max_cascades = 3;
 	float csm_lambda{0.9f};
 	float csm_cbias{0.00125f};
 	float csm_nbias{0.275f};
@@ -207,7 +210,7 @@ void renderer_generate_brdf_lut()
 
 void renderer_csm_init()
 {
-	log::info("renderer_csm_init: {} cascades, {}x{} float16unorm shadowmap", 4, 1536, 1536);
+	log::info("renderer_csm_init: {} cascades, {}x{} float16unorm shadowmap", renderer->csm_max_cascades, 1536, 1536);
 
 	gpu_create_sampler
 	({
@@ -220,9 +223,9 @@ void renderer_csm_init()
 		.compare_op = GPU_COMPARE_OP_LESS
 	});
 
-	renderer->shadowmaps.resize(4);
+	renderer->shadowmaps.resize(renderer->csm_max_cascades);
 	auto cmd = gpu_record_commands(GPU_QUEUE_GRAPHICS);
-	for(int i = 0; i < 4; i++)
+	for(int i = 0; i < renderer->csm_max_cascades; i++)
 	{
 		auto& smap = renderer->shadowmaps[i];
 
@@ -285,8 +288,6 @@ void renderer_init(Window& wnd)
 		vbconst->vertex_uv = renderer_geometry_vertex_uv_device_pointer();
 		vbconst->vertex_nor_tan = renderer_geometry_vertex_nor_tan_device_pointer();
 		vbconst->geom_indices = renderer_geometry_index_device_pointer();
-		vbconst->light_direction = vec4{-0.14f, -0.3f, -0.3f, 0.0f};
-		vbconst->light_color = vec4{0.68f * 38000.0f, 0.53f * 38000.0f, 0.46f * 38000.0f, 0.0f};
 		vbconst->env_brdf_handle = renderer->brdflut.handle;
 	}
 
@@ -556,6 +557,8 @@ void renderer_resolve_visbuffer(GPUCommandBuffer& cmd)
 
 void renderer_update_cascades(VisbufferCBuffer* vbconst, const RenderCameraData& vb_cam)
 {
+	auto maxc = renderer->csm_max_cascades;
+
 	std::array<vec3, 8> frustum_corners =
 	{
 		vec3{-1.0f, 1.0f, 0.0f},
@@ -577,9 +580,9 @@ void renderer_update_cascades(VisbufferCBuffer* vbconst, const RenderCameraData&
 
 	std::array<float, 4> split_dist;
 
-	for(int i = 0; i < 4; i++)
+	for(int i = 0; i < maxc; i++)
 	{
-		float p = (i + 1) / 4.0f;
+		float p = (i + 1) / static_cast<float>(maxc);
 		float log = vb_cam.znear * std::pow(ratio, p);
 		float uniform = vb_cam.znear + range * p;
 		float d = renderer->csm_lambda * log + (1.0f - renderer->csm_lambda) * uniform;
@@ -606,7 +609,7 @@ void renderer_update_cascades(VisbufferCBuffer* vbconst, const RenderCameraData&
 	}
 
 	float prev_split_dist = 0.0f;
-	for(int i = 0; i < 4; i++)
+	for(int i = 0; i < maxc; i++)
 	{
 		auto& smap = renderer->shadowmaps[i];
 		vbconst->cascade_rts[i] = smap.descriptor.handle;
@@ -636,10 +639,9 @@ void renderer_update_cascades(VisbufferCBuffer* vbconst, const RenderCameraData&
 		auto sp_point = vec4{0.0f, 0.0f, -1.0f * (vb_cam.znear + split_dist[i] * range), 1.0f} * vb_cam.proj;
 		vbconst->cascade_splits[i] = sp_point.z / sp_point.w;
 
-		// FIXME: reading light_direction over PCIe from VRAM constantbuffer
-		auto pos = fcenter - (vbconst->light_direction.demote<3>() * radius * 2.0f);
+		auto pos = fcenter - (renderer->light_direction * radius * 2.0f);
 
-		vec3 forward = vbconst->light_direction.demote<3>();
+		vec3 forward = renderer->light_direction;
 		vec3 right = vec3::normalize(vec3::cross(forward, vector_world_up));
 		vec3 up = vec3::normalize(vec3::cross(right, forward));
 
@@ -686,7 +688,7 @@ void renderer_update_shadowmaps(GPUCommandBuffer& cmd)
 		.depth_test = GPU_COMPARE_OP_LESS
 	};
 
-	for(int i = 0; i < 4; i++)
+	for(int i = 0; i < renderer->csm_max_cascades; i++)
 	{
 		auto& smap = renderer->shadowmaps[i];
 
@@ -765,6 +767,8 @@ void renderer_process_frame(double dt)
 	VisbufferCBuffer* vbconst = reinterpret_cast<VisbufferCBuffer*>(gpu_map_memory(renderer->visbuffer_cbv[renderer->frame_index]));
 	vbconst->res = f_res;
 	vbconst->inv_res = vec2{1.0f / f_res.x, 1.0f / f_res.y};
+	vbconst->light_direction = vec4{renderer->light_direction, 0.0f};
+	vbconst->light_color = vec4{renderer->light_color, 0.0f};
 	vbconst->env_irradiance_handle = renderer->envmap.irradiance.handle;
 	vbconst->env_prefiltered_handle = renderer->envmap.prefiltered.handle;
 	vbconst->smap_data = gpu_host_to_device_pointer(renderer->smap_data) + (512 * renderer->frame_index * sizeof(mat4));
@@ -911,6 +915,8 @@ RenderObject renderer_world_insert_object(const RenderObjectDescription& data, u
 		renderer->shadowmaps[3].render_view
 	};
 
+	shadow_level = std::min(shadow_level, renderer->csm_max_cascades);
+
 	return renderer->render_world.insert_object(data, {views.data(), shadow_level + 1u});
 }
 
@@ -948,6 +954,12 @@ void renderer_update_camera(const RenderCameraData& cam)
 	renderer_update_cascades(vbconst, cam);
 }
 
+void renderer_update_environment(const RenderEnvironmentData& env)
+{
+	renderer->light_direction = env.light_direction;
+	renderer->light_color = env.light_color * env.light_intensity;
+}
+
 void renderer_add_visbuffer_hook(visbuffer_read_hook&& hook)
 {
 	renderer->visbuffer_read_hooks.push_back(hook);
@@ -956,6 +968,36 @@ void renderer_add_visbuffer_hook(visbuffer_read_hook&& hook)
 void renderer_set_envmap(const RenderEnvironmentMap& envmap)
 {
 	renderer->envmap = envmap;
+}
+
+void renderer_imgui_panel()
+{
+	ImGui::Begin("Renderer");
+	ImGui::Combo("Tonemapper", &renderer->tonemapper, "ACES\0AGX\0\0");
+	ImGui::DragFloat("CSM lambda", &renderer->csm_lambda, 0.01f, 0.0f, 2.0f);
+
+	ImGui::Separator();
+
+	ImGui::Text("Camera");
+	renderer->render_world.imgui_debug_panel(renderer->camera_view);
+	ImGui::Separator();
+	ImGui::Text("CSM_0");
+	renderer->render_world.imgui_debug_panel(renderer->shadowmaps[0].render_view);
+	ImGui::Separator();
+	ImGui::Text("CSM_1");
+	renderer->render_world.imgui_debug_panel(renderer->shadowmaps[1].render_view);
+	ImGui::Separator();
+	ImGui::Text("CSM_2");
+	renderer->render_world.imgui_debug_panel(renderer->shadowmaps[2].render_view);
+	ImGui::Separator();
+	if(renderer->csm_max_cascades >= 4)
+	{
+		ImGui::Text("CSM_3");
+		renderer->render_world.imgui_debug_panel(renderer->shadowmaps[3].render_view);
+		ImGui::Separator();
+	}
+
+	ImGui::End();
 }
 
 }
