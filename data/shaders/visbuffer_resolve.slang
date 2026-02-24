@@ -60,11 +60,11 @@ float filterPCF(uint sm_index, float4 posLS, float2 svpos)
 	const float phi = interleavedGradientNoise(svpos) * 6.28318530718;
 
 	DescriptorHandle<Texture2D> rt = consts.cascade_rts[sm_index].desc;
-	factor += rt.SampleCmpLevelZero(sm_shadow.desc, textureUV + vogelDiskSample(0, 5, phi) * float2(dx, dx), ndc.z - consts.csm_cbias);
-	factor += rt.SampleCmpLevelZero(sm_shadow.desc, textureUV + vogelDiskSample(1, 5, phi) * float2(dx, dx), ndc.z - consts.csm_cbias);
-	factor += rt.SampleCmpLevelZero(sm_shadow.desc, textureUV + vogelDiskSample(2, 5, phi) * float2(dx, dx), ndc.z - consts.csm_cbias);
-	factor += rt.SampleCmpLevelZero(sm_shadow.desc, textureUV + vogelDiskSample(3, 5, phi) * float2(dx, dx), ndc.z - consts.csm_cbias);
-	factor += rt.SampleCmpLevelZero(sm_shadow.desc, textureUV + vogelDiskSample(4, 5, phi) * float2(dx, dx), ndc.z - consts.csm_cbias);
+	factor += nonuniform(rt)->SampleCmpLevelZero(sm_shadow.desc, textureUV + vogelDiskSample(0, 5, phi) * float2(dx, dx), ndc.z - consts.csm_cbias);
+	factor += nonuniform(rt)->SampleCmpLevelZero(sm_shadow.desc, textureUV + vogelDiskSample(1, 5, phi) * float2(dx, dx), ndc.z - consts.csm_cbias);
+	factor += nonuniform(rt)->SampleCmpLevelZero(sm_shadow.desc, textureUV + vogelDiskSample(2, 5, phi) * float2(dx, dx), ndc.z - consts.csm_cbias);
+	factor += nonuniform(rt)->SampleCmpLevelZero(sm_shadow.desc, textureUV + vogelDiskSample(3, 5, phi) * float2(dx, dx), ndc.z - consts.csm_cbias);
+	factor += nonuniform(rt)->SampleCmpLevelZero(sm_shadow.desc, textureUV + vogelDiskSample(4, 5, phi) * float2(dx, dx), ndc.z - consts.csm_cbias);
 	return factor * 0.2;
 }
 
@@ -119,7 +119,7 @@ void computeMain(uint groupIndex : SV_GroupIndex, uint2 Gid : SV_GroupID, unifor
 	ResourceHandle<SamplerState> smp = {0u};
 	if(primitiveID == 0)
 	{
-		input.framebuffer.desc[pixel] = consts.prefiltered.desc.SampleLevel(smp.desc, ray_direction, 0) * consts.exposure * consts.ambient_factor;
+		input.framebuffer.desc[pixel] = consts.prefiltered.desc->SampleLevel(smp.desc, ray_direction, 0) * consts.exposure * consts.ambient_factor;
 	}
 
 	float3 p0;
@@ -195,13 +195,13 @@ void computeMain(uint groupIndex : SV_GroupIndex, uint2 Gid : SV_GroupID, unifor
 	float3 V = normalize(consts.cam_pos.xyz - p);
 	
 	ResourceHandle<SamplerState> smp_aniso = {1u};
-	float3 albedo = (mtl.albedo.valid() ? mtl.albedo.desc.SampleGrad(smp_aniso.desc, uvs, uv_dx, uv_dy).xyz : float3(1.0)) * mtl.diffuse_factor.xyz;
-	float3 emissive = (mtl.emissive.valid() ? mtl.emissive.desc.SampleGrad(smp_aniso.desc, uvs, uv_dx, uv_dy).xyz : float3(1.0)) * mtl.emissive_factor.xyz;
-	float3 physical = mtl.mro.valid() ? mtl.mro.desc.SampleGrad(smp_aniso.desc, uvs, uv_dx, uv_dy).xyz : float3(1.0, 1.0, 0.0);
+	float3 albedo = (mtl.albedo.valid() ? nonuniform(mtl.albedo.desc)->SampleGrad(smp_aniso.desc, uvs, uv_dx, uv_dy).xyz : float3(1.0)) * mtl.diffuse_factor.xyz;
+	float3 emissive = (mtl.emissive.valid() ? nonuniform(mtl.emissive.desc)->SampleGrad(smp_aniso.desc, uvs, uv_dx, uv_dy).xyz : float3(1.0)) * mtl.emissive_factor.xyz;
+	float3 physical = mtl.mro.valid() ? nonuniform(mtl.mro.desc)->SampleGrad(smp_aniso.desc, uvs, uv_dx, uv_dy).xyz : float3(1.0, 1.0, 0.0);
 
 	if(mtl.normalmap.valid() && dot(V, V) < 1000)
 	{
-		float2 normalmap = mtl.normalmap.desc.SampleGrad(smp_aniso.desc, uvs, uv_dx, uv_dy).xy;
+		float2 normalmap = nonuniform(mtl.normalmap.desc)->SampleGrad(smp_aniso.desc, uvs, uv_dx, uv_dy).xy;
 		
 		float4 tan0_raw = decode_tangent(n0_raw, asfloat(vn0.y));
 		float4 tan1_raw = decode_tangent(n1_raw, asfloat(vn1.y));
@@ -226,7 +226,7 @@ void computeMain(uint groupIndex : SV_GroupIndex, uint2 Gid : SV_GroupID, unifor
 	float NdotV = dot(N, V);
 	N += (2.0 * saturate(-NdotV)) * V;
 
-	float3 amb_IRR = consts.irradiance.desc.SampleLevel(smp.desc, N, 0) * consts.ambient_factor;
+	float3 amb_IRR = consts.irradiance.desc->SampleLevel(smp.desc, N, 0) * consts.ambient_factor;
 
 	NdotV = dot(N, V);
 
@@ -237,10 +237,10 @@ void computeMain(uint groupIndex : SV_GroupIndex, uint2 Gid : SV_GroupID, unifor
 	float3 f0 = float3(reflectance * (1.0 - metallic)) + albedo * metallic;
 	float3 f90 = saturate(50.0 * f0);
 
-	float2 envBRDF = consts.brdf.desc.SampleLevel(smp.desc, float2(max(NdotV, 0.0), roughness), 0);
+	float2 envBRDF = consts.brdf.desc->SampleLevel(smp.desc, float2(max(NdotV, 0.0), roughness), 0);
 
 	float3 reflection = reflect(-V, N);
-	float3 amb_PFC = consts.prefiltered.desc.SampleLevel(smp.desc, reflection, roughness * 8.0) * consts.ambient_factor;
+	float3 amb_PFC = consts.prefiltered.desc->SampleLevel(smp.desc, reflection, roughness * 8.0) * consts.ambient_factor;
 
 	roughness = max(roughness, 0.045);
 	l0 += calculate_direct_lighting(N, V, NdotV, diffuse, roughness, f0, p, normalize(normal_raw), tmp.z, svpos);

@@ -38,7 +38,7 @@ void fragmentMain(VSOutput input, uniform VSInput data)
 	Ptr<MaterialPBR, Access.Read> mtl = data.materials + WaveReadLaneFirst(input.material);
 
 	ResourceHandle<SamplerState> smp_aniso = {1u};
-	float alpha = mtl->albedo.desc.Sample(smp_aniso.desc, input.uv).a;
+	float alpha = nonuniform(mtl->albedo.desc)->Sample(smp_aniso.desc, input.uv).a;
 	if(alpha < mtl->alpha_cf)
 		discard;
 }
