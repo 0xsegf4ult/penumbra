@@ -35,43 +35,40 @@ float3 decompress_bc5n(float2 bc5n)
 	return float3(bc5n, sqrt(max(1.0 - dot(bc5n, bc5n), 0.0)));
 }
 
-static const float2 poissonDisk[16] = {
-        float2(-0.94201624, -0.39906216),
-        float2(0.94558609, -0.76890725),
-        float2(-0.094184101, -0.92938870),
-        float2(0.34495938, 0.29387760),
-        float2(-0.91588581, 0.45771432),
-        float2(-0.81544232, -0.87912464),
-        float2(-0.38277543, 0.27676845),
-        float2(0.97484398, 0.75648379),
-        float2(0.44323325, -0.97511554),
-        float2(0.53742981, -0.47373420),
-        float2(-0.26496911, -0.41893023),
-        float2(-0.79197514, 0.19090188),
-        float2(-0.24188840, 0.99706507),
-        float2(-0.81409955, 0.91437590),
-        float2(0.19984126, 0.78641367),
-        float2(0.14383161, -0.14100790)
-};
+float2 vogelDiskSample(int sample_index, int sample_count, float phi)
+{
+	const float golden_angle = 2.399963229728653;
+	float r = sqrt(float(sample_index) + 0.5) / sqrt(float(sample_count));
+	float theta = float(sample_index) * golden_angle + phi;
+	return float2(cos(theta), sin(theta)) * r;
+}
 
-float filterPCF(uint sm_index, float4 posLS)
+float interleavedGradientNoise(float2 pos)
+{
+	return frac(52.9829189 * frac(dot(pos, float2(0.06711056, 0.00583715))));
+}
+
+float filterPCF(uint sm_index, float4 posLS, float2 svpos)
 {
 	ResourceHandle<SamplerComparisonState> sm_shadow = {2u};
-	float dx = consts.csm_scale * (0.25 * (3 - sm_index));
+	float dx = consts.csm_scale * (0.25 * (3 - sm_index)) * 2.5f;
 	float factor = 0.0;
 
 	float3 ndc = posLS.xyz / posLS.w;
 	float2 textureUV = float2(ndc.x, ndc.y) * 0.5 + 0.5;
-	
-	for(int i = 0; i < 16; i++)
-	{
-		factor += consts.cascade_rts[sm_index].desc.SampleCmpLevelZero(sm_shadow.desc, textureUV + poissonDisk[i] * float2(dx, dx), ndc.z - consts.csm_cbias);
-	}
 
-	return factor * 0.0625;
+	const float phi = interleavedGradientNoise(svpos) * 6.28318530718;
+
+	DescriptorHandle<Texture2D> rt = consts.cascade_rts[sm_index].desc;
+	factor += rt.SampleCmpLevelZero(sm_shadow.desc, textureUV + vogelDiskSample(0, 5, phi) * float2(dx, dx), ndc.z - consts.csm_cbias);
+	factor += rt.SampleCmpLevelZero(sm_shadow.desc, textureUV + vogelDiskSample(1, 5, phi) * float2(dx, dx), ndc.z - consts.csm_cbias);
+	factor += rt.SampleCmpLevelZero(sm_shadow.desc, textureUV + vogelDiskSample(2, 5, phi) * float2(dx, dx), ndc.z - consts.csm_cbias);
+	factor += rt.SampleCmpLevelZero(sm_shadow.desc, textureUV + vogelDiskSample(3, 5, phi) * float2(dx, dx), ndc.z - consts.csm_cbias);
+	factor += rt.SampleCmpLevelZero(sm_shadow.desc, textureUV + vogelDiskSample(4, 5, phi) * float2(dx, dx), ndc.z - consts.csm_cbias);
+	return factor * 0.2;
 }
 
-float3 calculate_direct_lighting(float3 N, float3 V, float NdotV, float3 diffuse, float roughness, float3 f0, float3 wpos, float3 in_normal, float depth)
+float3 calculate_direct_lighting(float3 N, float3 V, float NdotV, float3 diffuse, float roughness, float3 f0, float3 wpos, float3 in_normal, float depth, float2 svpos)
 {
 	float shadow = 1.0;
 	uint cascadeIndex = 0;
@@ -85,7 +82,7 @@ float3 calculate_direct_lighting(float3 N, float3 V, float NdotV, float3 diffuse
 	float NdotL = saturate(dot(N, L));
 	float4 sm_samplePos = float4(wpos, 1.0) + (float4(in_normal, 0.0) * dot(in_normal, L) * consts.csm_nbias);
 	if(NdotL > 0.01)
-		shadow = lerp(0.0, 1.0, filterPCF(cascadeIndex, mul(sm_samplePos, consts.smap_data[cascadeIndex])));
+		shadow = filterPCF(cascadeIndex, mul(sm_samplePos, consts.smap_data[cascadeIndex]), svpos);
 
 	float3 H = normalize(V + L);
 	float NdotH = dot(N, H);
@@ -140,36 +137,34 @@ void computeMain(uint groupIndex : SV_GroupIndex, uint2 Gid : SV_GroupID, unifor
 	if(!(pixel.x >= consts.res.x || pixel.y >= consts.res.y || primitiveID == 0))
 	{
 
-	{
-		uint triangleID = primitiveID & 0x7F;
-                uint meshletID = (primitiveID >> 7) - 1;
+	uint triangleID = primitiveID & 0x7F;
+	uint meshletID = (primitiveID >> 7) - 1;
 
-                uint instance = input.instances[meshletID].object - 1;
-		float4x4 trs = input.objects[instance].transform;
-               	material = input.objects[instance].material_offset;
-                GeometryCluster cluster = input.clusters[input.instances[meshletID].cluster];
-                uint i0 = uint(consts.ibuf[cluster.index_offset + (3 * triangleID) + 0]) + cluster.vertex_offset;
-                uint i1 = uint(consts.ibuf[cluster.index_offset + (3 * triangleID) + 1]) + cluster.vertex_offset;
-                uint i2 = uint(consts.ibuf[cluster.index_offset + (3 * triangleID) + 2]) + cluster.vertex_offset;
+	uint instance = input.instances[meshletID].object - 1;
+	float4x4 trs = input.objects[instance].transform;
+	material = input.objects[instance].material_offset;
+	GeometryCluster cluster = input.clusters[input.instances[meshletID].cluster];
+	uint i0 = uint(consts.ibuf[cluster.index_offset + (3 * triangleID) + 0]) + cluster.vertex_offset;
+	uint i1 = uint(consts.ibuf[cluster.index_offset + (3 * triangleID) + 1]) + cluster.vertex_offset;
+	uint i2 = uint(consts.ibuf[cluster.index_offset + (3 * triangleID) + 2]) + cluster.vertex_offset;
 
-                p0 = mul(float4(consts.vertex_pos[i0], 1.0), trs).xyz;
-                p1 = mul(float4(consts.vertex_pos[i1], 1.0), trs).xyz;
-                p2 = mul(float4(consts.vertex_pos[i2], 1.0), trs).xyz;
-                
-		uv0 = consts.vertex_uv[i0];
-                uv1 = consts.vertex_uv[i1];
-                uv2 = consts.vertex_uv[i2];
+	p0 = mul(float4(consts.vertex_pos[i0], 1.0), trs).xyz;
+	p1 = mul(float4(consts.vertex_pos[i1], 1.0), trs).xyz;
+	p2 = mul(float4(consts.vertex_pos[i2], 1.0), trs).xyz;
 
-		vn0 = consts.vertex_nor_tan[i0];
-		vn1 = consts.vertex_nor_tan[i1];
-		vn2 = consts.vertex_nor_tan[i2];
+	uv0 = consts.vertex_uv[i0];
+	uv1 = consts.vertex_uv[i1];
+	uv2 = consts.vertex_uv[i2];
 
-		trs_invT = float3x3(
-			cross(trs[1].xyz, trs[2].xyz),
-			cross(trs[2].xyz, trs[0].xyz),
-			cross(trs[0].xyz, trs[1].xyz)	
-		);
-	}
+	vn0 = consts.vertex_nor_tan[i0];
+	vn1 = consts.vertex_nor_tan[i1];
+	vn2 = consts.vertex_nor_tan[i2];
+
+	trs_invT = float3x3(
+		cross(trs[1].xyz, trs[2].xyz),
+		cross(trs[2].xyz, trs[0].xyz),
+		cross(trs[0].xyz, trs[1].xyz)
+	);
 
 	MaterialPBR mtl = input.materials[material];
 
@@ -248,7 +243,7 @@ void computeMain(uint groupIndex : SV_GroupIndex, uint2 Gid : SV_GroupID, unifor
 	float3 amb_PFC = consts.prefiltered.desc.SampleLevel(smp.desc, reflection, roughness * 8.0) * consts.ambient_factor;
 
 	roughness = max(roughness, 0.045);
-	l0 += calculate_direct_lighting(N, V, NdotV, diffuse, roughness, f0, p, normalize(normal_raw), tmp.z);
+	l0 += calculate_direct_lighting(N, V, NdotV, diffuse, roughness, f0, p, normalize(normal_raw), tmp.z, svpos);
 
 	float horizon = min(1.0 + dot(reflection, N), 1.0);
 	float3 amb_SPEC = amb_PFC * (f0 * envBRDF.x + f90 * envBRDF.y) * horizon * horizon;

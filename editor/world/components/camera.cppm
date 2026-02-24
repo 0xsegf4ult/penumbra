@@ -15,7 +15,7 @@ export struct camera_component
 {
 	float vertical_fov{70.0f};
 	float near_plane{0.1f};
-	float far_plane{128.0f};
+	float far_plane{100.0f};
 	CameraProjection projection{CAMERA_PROJECTION_PERSPECTIVE};
 
 	float aperture{8.0f};
