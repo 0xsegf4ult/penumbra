@@ -49,12 +49,12 @@ public:
 		return *(_data + index);
 	}
 
-	bool empty() const noexcept
+	[[nodiscard]] bool empty() const noexcept
 	{
 		return _size == 0;
 	}
 
-	std::size_t size() const noexcept
+	[[nodiscard]] std::size_t size() const noexcept
 	{
 		return _size;
 	}

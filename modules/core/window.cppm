@@ -86,7 +86,7 @@ public:
 			SDL_DestroyWindow(handle);
 	}
 
-	bool requested_close() const
+	[[nodiscard]] bool requested_close() const
 	{
 		return req_close;
 	}
@@ -167,12 +167,12 @@ public:
 		}
 	}
 
-	vec2 get_mouse_pos() const
+	[[nodiscard]] vec2 get_mouse_pos() const
 	{
 		return mouse_pos;
 	}
 
-	vec2 get_mouse_delta() const
+	[[nodiscard]] vec2 get_mouse_delta() const
 	{
 		if(capture_mouse)
 		{
@@ -192,7 +192,7 @@ public:
 			SDL_GetRelativeMouseState(nullptr, nullptr);
 	}
 
-	bool is_key_down(KeyboardScancode scancode) const
+	[[nodiscard]] bool is_key_down(KeyboardScancode scancode) const
 	{
 		if(scancode >= SCANCODE_COUNT)
 			return false;
@@ -200,17 +200,17 @@ public:
 		return key_states[scancode_to_sdl(scancode)];
 	}
 
-	SDL_Window* native_handle() const
+	[[nodiscard]] SDL_Window* native_handle() const
 	{
 		return handle;
 	}
 
-	uvec2 get_size() const
+	[[nodiscard]] uvec2 get_size() const
 	{
 		return size;
 	}
 
-	bool is_fullscreen() const
+	[[nodiscard]] bool is_fullscreen() const
 	{
 		return SDL_GetWindowFlags(handle) & SDL_WINDOW_FULLSCREEN;
 	}
@@ -220,32 +220,32 @@ public:
 		SDL_SetWindowFullscreen(handle, state);
 	}
 
-	void register_key_event_listener(key_event_callback callback)
+	void register_key_event_listener(const key_event_callback& callback)
 	{
 		key_event_listeners.push_back(callback);
 	}
 
-        void register_text_event_listener(text_event_callback callback)
+        void register_text_event_listener(const text_event_callback& callback)
         {
                 text_event_listeners.push_back(callback);
         }
 
-        void register_mouse_button_event_listener(mouse_button_event_callback callback)
+        void register_mouse_button_event_listener(const mouse_button_event_callback& callback)
         {
                 mouse_button_event_listeners.push_back(callback);
         }
 
-        void register_mouse_move_event_listener(mouse_move_event_callback callback)
+        void register_mouse_move_event_listener(const mouse_move_event_callback& callback)
         {
                 mouse_move_event_listeners.push_back(callback);
         }
 
-        void register_mouse_wheel_event_listener(mouse_wheel_event_callback callback)
+        void register_mouse_wheel_event_listener(const mouse_wheel_event_callback& callback)
         {
                 mouse_wheel_event_listeners.push_back(callback);
         }
 
-	bool text_input_active() const
+	[[nodiscard]] bool text_input_active() const
 	{
 		return SDL_TextInputActive(handle);
 	}
