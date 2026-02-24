@@ -113,7 +113,7 @@ public:
 		if(robj)
 		{
 			if(robj->material.get_handle())
-				inspect_material(resource_manager_get_material(robj->material));
+				inspect_material(robj->material);
 		}
 	}
 private:
@@ -158,28 +158,28 @@ private:
 		}
 	}
 
-	void inspect_material(const MaterialResource& mtl)
+	void inspect_material(const ResourceID& rid)
 	{
+		auto& mtl = resource_manager_get_material(rid);
+
 		if(ImGui::CollapsingHeader("Material"))
 		{
+			bool dirty = false;
+			
 			ImGui::Text("%s", mtl.name.c_str());
 
-			vec3 df = mtl.factors.diffuse;
-			float rf = mtl.factors.roughness;
-			float mf = mtl.factors.metallic;
-			float nf = mtl.factors.normal;
-			float refl = mtl.factors.reflectivity;
-			vec3 ef = mtl.factors.emissive;
-		
-			ImGui::DragFloat3("Diffuse factor", &df.x, 0.01f, 0.0f, 1.0f);
-			ImGui::DragFloat("Roughness factor", &rf, 0.01f, 0.0f, 1.0f);
-			ImGui::DragFloat("Metallic factor", &mf, 0.01f, 0.0f, 1.0f);
-			ImGui::DragFloat("Normal factor", &nf, 0.01f, 0.0f, 1.0f);
-			ImGui::DragFloat("Reflectivity", &refl, 0.01f, 0.0f, 1.0f);
-			ImGui::ColorEdit3("Emissive color", &ef.x);
+			dirty |= ImGui::DragFloat3("Diffuse factor", &mtl.factors.diffuse.x, 0.01f, 0.0f, 1.0f);
+			dirty |= ImGui::DragFloat("Roughness factor", &mtl.factors.roughness, 0.01f, 0.0f, 1.0f);
+			dirty |= ImGui::DragFloat("Metallic factor", &mtl.factors.metallic, 0.01f, 0.0f, 1.0f);
+			dirty |= ImGui::DragFloat("Normal factor", &mtl.factors.normal, 0.01f, 0.0f, 1.0f);
+			dirty |= ImGui::DragFloat("Reflectivity", &mtl.factors.reflectivity, 0.01f, 0.0f, 1.0f);
+			dirty |= ImGui::ColorEdit3("Emissive color", &mtl.factors.emissive.x);
 
 			if(mtl.flags & RENDER_MATERIAL_ALPHA_MASK)
 				ImGui::Text("MATERIAL_FLAG_ALPHA_MASK");
+
+			if(dirty)
+				resource_manager_sync_material(rid);
 		}
 	}
 

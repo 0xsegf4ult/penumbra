@@ -21,8 +21,9 @@ export ResourceID resource_manager_load_geometry(const vfs::path& path);
 export ResourceID resource_manager_load_texture(const vfs::path& path);
 export ResourceID resource_manager_create_material(MaterialResource&& data);
 
-export const GeometryResource& resource_manager_get_geometry(const ResourceID& rid);
-export const TextureResource& resource_manager_get_texture(const ResourceID& rid);
-export const MaterialResource& resource_manager_get_material(const ResourceID& rid);
+export GeometryResource& resource_manager_get_geometry(const ResourceID& rid);
+export TextureResource& resource_manager_get_texture(const ResourceID& rid);
+export MaterialResource& resource_manager_get_material(const ResourceID& rid);
+export void resource_manager_sync_material(const ResourceID& rid);
 
 }

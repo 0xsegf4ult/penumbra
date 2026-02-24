@@ -899,6 +899,17 @@ void renderer_write_material(const RenderMaterialData& data)
 	renderer->materials.size++;
 }
 
+void renderer_write_material(uint32_t offset, const RenderMaterialData& data)
+{
+	if(offset == 0 || offset >= renderer->materials.size)
+	{
+		log::warn("renderer_write_material: index [{}] out of range", offset);
+		return;
+	}
+
+	memcpy(gpu_map_memory(renderer->materials.data) + (offset * sizeof(RenderMaterialData)), &data, sizeof(RenderMaterialData));
+}
+
 GPUDevicePointer renderer_materials_device_pointer()
 {
 	return gpu_host_to_device_pointer(renderer->materials.data);

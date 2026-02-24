@@ -81,6 +81,7 @@ export uint32_t renderer_gfx_frame_index();
 export uint64_t renderer_resource_transfer_syncval();
 export void renderer_write_texture(GPUTexture texture, std::span<const std::byte> data, uint32_t num_mips = 1, uint32_t num_layers = 1);
 export void renderer_write_material(const RenderMaterialData& data);
+export void renderer_write_material(uint32_t offset, const RenderMaterialData& data);
 export GPUDevicePointer renderer_materials_device_pointer();
 export RenderObject renderer_world_insert_object(const RenderObjectDescription& data, uint32_t shadow_level = 4);
 export RenderBucketData renderer_world_get_bucket(RenderView view, RenderBucket bucket);

@@ -206,25 +206,42 @@ ResourceID resource_manager_create_material(MaterialResource&& data)
 	return rid;
 }
 
-const GeometryResource& resource_manager_get_geometry(const ResourceID& rid)
+GeometryResource& resource_manager_get_geometry(const ResourceID& rid)
 {
 	assert(rid.get_type() == ResourceType::Geometry);
 	assert(rid.get_handle());
 	return context->geometry[rid.get_handle() - 1];
 }
 
-const TextureResource& resource_manager_get_texture(const ResourceID& rid)
+TextureResource& resource_manager_get_texture(const ResourceID& rid)
 {
 	assert(rid.get_type() == ResourceType::Texture);
 	assert(rid.get_handle());
 	return context->texture[rid.get_handle() - 1];
 }
 
-const MaterialResource& resource_manager_get_material(const ResourceID& rid)
+MaterialResource& resource_manager_get_material(const ResourceID& rid)
 {
 	assert(rid.get_type() == ResourceType::Material);
 	assert(rid.get_handle());
 	return context->material[rid.get_handle() - 1];
+}
+
+void resource_manager_sync_material(const ResourceID& rid)
+{
+	assert(rid.get_type() == ResourceType::Material);
+	assert(rid.get_handle());
+	auto& res = context->material[rid.get_handle() - 1];
+
+	renderer_write_material(rid.get_handle(),
+	{
+		.factors = res.factors,
+		.flags = res.flags,
+		.albedo = res.albedo.get_handle() ? resource_manager_get_texture(res.albedo).descriptor.handle : 0u,
+		.mro = res.mro.get_handle() ? resource_manager_get_texture(res.mro).descriptor.handle : 0u,
+		.normalmap = res.normalmap.get_handle() ? resource_manager_get_texture(res.normalmap).descriptor.handle : 0u,
+		.emissive = res.emissive.get_handle() ? resource_manager_get_texture(res.emissive).descriptor.handle : 0u,
+	});
 }
 
 }
