@@ -842,6 +842,31 @@ bool vulkan_create_device(std::span<VkPhysicalDevice> phys_devices, int index = 
 	gpu_context->props.device_name = std::string{props.properties.deviceName};
 	auto queue_ci = vulkan_device_create_queues();
 
+	uint32_t dev_ext_count = 0u;
+       	vkEnumerateDeviceExtensionProperties(gpu_context->phys_device, nullptr, &dev_ext_count, nullptr);	
+	std::vector<VkExtensionProperties> dev_supported_ext(dev_ext_count);
+	vkEnumerateDeviceExtensionProperties(gpu_context->phys_device, nullptr, &dev_ext_count, dev_supported_ext.data());
+
+	bool has_ds3 = false;
+	bool has_unified_layouts = false;
+	for(auto& ext : dev_supported_ext)
+	{
+		if(!has_ds3 && std::strncmp(ext.extensionName, VK_EXT_EXTENDED_DYNAMIC_STATE_3_EXTENSION_NAME, VK_MAX_EXTENSION_NAME_SIZE) == 0)
+			has_ds3 = true;
+
+		if(!has_unified_layouts && std::strncmp(ext.extensionName, VK_KHR_UNIFIED_IMAGE_LAYOUTS_EXTENSION_NAME, VK_MAX_EXTENSION_NAME_SIZE) == 0)
+			has_unified_layouts = true;
+	}
+
+	if(!has_ds3)
+	{
+		auto msg = std::format("gpu_vulkan: unsupported extension {}", VK_EXT_EXTENDED_DYNAMIC_STATE_3_EXTENSION_NAME);
+		panic(msg.c_str());
+	}
+
+	if(!has_unified_layouts)
+		log::warn("gpu_vulkan: {} unsupported: performance might suffer!", VK_KHR_UNIFIED_IMAGE_LAYOUTS_EXTENSION_NAME);
+
 	VkPhysicalDeviceExtendedDynamicState3FeaturesEXT ds3ext
 	{
 		.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTENDED_DYNAMIC_STATE_3_FEATURES_EXT,
