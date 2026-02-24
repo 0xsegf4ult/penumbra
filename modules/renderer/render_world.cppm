@@ -21,8 +21,9 @@ namespace penumbra
 enum RenderViewFlags
 {
 	RENDER_VIEW_FRUSTUM_CULL = 0x1,
-	RENDER_VIEW_OCCLUSION_CULL = 0x2,
-	RENDER_VIEW_ORTHOGRAPHIC = 0x4
+	RENDER_VIEW_CONE_CULL = 0x2,
+	RENDER_VIEW_OCCLUSION_CULL = 0x4,
+	RENDER_VIEW_ORTHOGRAPHIC = 0x8
 };
 
 struct RenderViewCBuffer
@@ -142,6 +143,8 @@ public:
 		view.is_shadow = is_shadow;
 
 		view.flags = RENDER_VIEW_FRUSTUM_CULL;
+		if(!is_shadow)
+			view.flags |= RENDER_VIEW_CONE_CULL;
 
 		return RenderView{static_cast<uint32_t>(views.size())};
 	}
@@ -423,11 +426,15 @@ public:
 		uint32_t flags = view.flags;
 
 		bool frc = flags & RENDER_VIEW_FRUSTUM_CULL;
+		bool cc = flags & RENDER_VIEW_CONE_CULL;
 		ImGui::Checkbox("Frustum culling", &frc);
+		ImGui::Checkbox("Cone culling", &cc);
 
 		uint32_t newflags = 0;
 		if(frc)
 			newflags |= RENDER_VIEW_FRUSTUM_CULL;
+		if(cc)
+			newflags |= RENDER_VIEW_CONE_CULL;
 
 		view.flags = newflags;
 

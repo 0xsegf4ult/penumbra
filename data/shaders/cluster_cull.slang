@@ -18,6 +18,7 @@ bool is_visible(float4 sphere, float radius, float3 cone, float cone_cutoff)
 	bool visible = true;
 
 	float3 center = mul(sphere, culling_data.viewmat).xyz;
+	float3 cone_axis = mul(cone, float3x3(culling_data.viewmat));
 
 	if(culling_data.flags & CullingFlags.FrustumCull)
 	{
@@ -32,6 +33,14 @@ bool is_visible(float4 sphere, float radius, float3 cone, float cone_cutoff)
 			visible = visible && center.z * culling_data.frustum_planes[0].w - abs(center.y) * culling_data.frustum_planes[0].z > -radius;
 			visible = visible && -center.z + radius > culling_data.znear && -center.z - radius < culling_data.zfar;
 		}
+	}
+
+	if(visible && culling_data.flags & CullingFlags.ConeCull)
+	{
+		if(culling_data.flags & CullingFlags.IsOrtho)
+			visible = visible && dot(center, cone_axis) < cone_cutoff;
+		else
+			visible = visible && dot(center, cone_axis) < cone_cutoff * length(center) + radius;
 	}
 
 	return visible;
@@ -52,9 +61,9 @@ void computeMain(uint DTid: SV_DispatchThreadID, uniform CSInput input)
 	Ptr<GeometryCluster, Access.Read> cluster = input.clusters + instance.cluster;
 	float4 center = mul(float4(cluster->sphere.xyz, 1.0), object->transform);
 	float radius = cluster->sphere.w * object->cull_scale;
-	float3 cone_axis = mul(cluster.cone.xyz, float3x3(object->transform));
+	float3 cone_axis = mul(cluster->cone.xyz, float3x3(object->transform));
 
-	if(is_visible(center, radius, cone_axis, cluster.cone.w))
+	if(is_visible(center, radius, cone_axis, cluster->cone.w))
 	{
 		uint bucket = object->pack_bucket_lcount >> 16;
 		InterlockedAdd(input.buckets[bucket].count, 1u);

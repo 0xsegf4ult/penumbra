@@ -58,6 +58,7 @@ struct IndirectCommand
 enum CullingFlags : uint
 {
 	FrustumCull,
+	ConeCull,
 	OcclusionCull,
 	IsOrtho
 };
