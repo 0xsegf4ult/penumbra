@@ -29,6 +29,20 @@ public:
 			tree_draw(cur, ctr);
 			cur = world->entities.get<entity_relationship>(cur).next_sibling;
 		}
+
+		if(ImGui::IsMouseDown(ImGuiMouseButton_Left) && ImGui::IsWindowHovered())
+			world->selected_entity = ecs::null;
+
+		if(ImGui::BeginPopupContextWindow("Create", ImGuiPopupFlags_MouseButtonRight | ImGuiPopupFlags_NoOpenOverItems))
+		{
+			if(ImGui::MenuItem("Entity"))
+			{
+				auto ent = world->spawn("Entity");
+				add_entity_as_child(world->entities, (world->selected_entity != ecs::null) ? world->selected_entity : world->root, ent);
+			}
+
+			ImGui::EndPopup();
+		}
 	}
 private:
 	void tree_draw(ecs::entity ent, uint32_t& ctr)
@@ -46,11 +60,25 @@ private:
 		if(world->selected_entity == ent)
 			flags |= ImGuiTreeNodeFlags_Selected;
 
-		if(ImGui::TreeNodeEx(graph.get<entity_name>(ent).c_str(), flags))
-		{
-			if(ImGui::IsItemHovered() && ImGui::IsMouseDown(0))
-				world->selected_entity = ent;
+		bool node_open = ImGui::TreeNodeEx(graph.get<entity_name>(ent).c_str(), flags);
+		
+		if(ImGui::IsMouseDown(ImGuiMouseButton_Left) && ImGui::IsItemHovered())
+			world->selected_entity = ent;
 
+		bool wants_delete = false;
+		if(ImGui::BeginPopupContextItem())
+		{
+			bool is_protected = (ent == world->main_camera) || (ent == world->env);
+			ImGui::BeginDisabled(is_protected);
+			if(ImGui::MenuItem("Delete"))
+				wants_delete = true;
+			ImGui::EndDisabled();
+
+			ImGui::EndPopup();
+		}
+
+		if(node_open)
+		{
 			ecs::entity cur = graph.get<entity_relationship>(ent).first_child;
 			while(graph.valid(cur))
 			{
@@ -59,6 +87,14 @@ private:
 			}
 
 			ImGui::TreePop();
+		}
+
+		if(wants_delete)
+		{
+			if(world->selected_entity == ent)
+				world->selected_entity = ecs::null;
+
+			//graph.destroy(ent);
 		}
 
 		ImGui::PopID();

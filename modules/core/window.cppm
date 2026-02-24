@@ -97,12 +97,18 @@ public:
 
 		SDL_Event event;
 
+		if(!capture_mouse)
+		{
+
 		float mx, my;
 		SDL_GetGlobalMouseState(&mx, &my);
+		
 		vec2 mpos{mx, my};
 
 		mouse_delta = mpos - mouse_pos;
 		mouse_pos = mpos;
+
+		}
 
 		while(SDL_PollEvent(&event))
 		{
@@ -115,8 +121,10 @@ public:
 			}
 			case SDL_EVENT_WINDOW_RESIZED:
 			{
+				log::info("window_manager: window resize {}x{} -> {}x{}", size.w, size.h, event.window.data1, event.window.data2);
 				size.w = static_cast<uint32_t>(event.window.data1);
 				size.h = static_cast<uint32_t>(event.window.data2);
+
 				break;
 			}
 			case SDL_EVENT_KEY_DOWN:
@@ -166,7 +174,22 @@ public:
 
 	vec2 get_mouse_delta() const
 	{
+		if(capture_mouse)
+		{
+			float dx, dy;
+			SDL_GetRelativeMouseState(&dx, &dy);
+			return {dx, dy};
+		}
+
 		return mouse_delta;
+	}
+
+	void set_capture_mouse(bool state) 
+	{
+		capture_mouse = state;
+		SDL_SetWindowRelativeMouseMode(handle, state);
+		if(state)
+			SDL_GetRelativeMouseState(nullptr, nullptr);
 	}
 
 	bool is_key_down(KeyboardScancode scancode) const
@@ -244,6 +267,7 @@ private:
 	
 	vec2 mouse_pos{0.0f};
 	vec2 mouse_delta{0.0f};
+	bool capture_mouse{false};
 	const bool* key_states{nullptr};
 
 	std::vector<key_event_callback> key_event_listeners;

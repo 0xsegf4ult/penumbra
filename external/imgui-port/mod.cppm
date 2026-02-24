@@ -28,6 +28,7 @@ export namespace ImGui
 	using ImGui::GetWindowHeight;
 	using ImGui::SetNextWindowSize;
 	using ImGui::IsWindowFocused;
+	using ImGui::IsWindowHovered;
 	using ImGui::SetNextWindowPos;
 	using ImGui::GetMainViewport;
 	using ImGui::SetNextWindowViewport;
@@ -45,6 +46,7 @@ export namespace ImGui
 	using ImGui::EndMenuBar;
 	using ImGui::OpenPopup;
 	using ImGui::BeginPopupModal;
+	using ImGui::BeginPopupContextWindow;
 	using ImGui::BeginPopupContextItem;
 	using ImGui::CloseCurrentPopup;
 	using ImGui::EndPopup;
@@ -67,7 +69,11 @@ export namespace ImGui
 	using ImGui::PopID;
 	using ImGui::BeginDisabled;
 	using ImGui::EndDisabled;
-	
+	using ImGui::SetNextItemWidth;
+	using ImGui::Columns;
+	using ImGui::NextColumn;
+	using ImGui::SetColumnWidth;
+		
 	using ImGui::CalcTextSize;
 
 	using ImGui::Button;
@@ -158,6 +164,7 @@ export using ::ImGuiStyleVar_WindowRounding;
 export using ::ImGuiStyleVar_WindowBorderSize;
 export using ::ImGuiStyleVar_WindowPadding;
 export using ::ImGuiStyleVar_ItemSpacing;
+export using ::ImGuiStyleVar_FramePadding;
 export using ::ImGuiMouseButton_Left;
 export using ::ImGuiMouseButton_Right;
 export using ::ImGuiMouseButton_Middle;
@@ -210,3 +217,5 @@ export using ::ImGuiDragDropFlags_AcceptNoPreviewTooltip;
 export using ::ImGuiPayload;
 export using ::ImGuiMouseCursor;
 export using ::ImGuiMouseCursor_NotAllowed;
+export using ::ImGuiPopupFlags_MouseButtonRight;
+export using ::ImGuiPopupFlags_NoOpenOverItems;

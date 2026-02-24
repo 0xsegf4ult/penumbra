@@ -17,6 +17,66 @@ using std::uint32_t;
 namespace penumbra
 {
 
+bool inspect_float(const char* title, float& flt, vec2 range = vec2{0.0f})
+{
+	ImGui::PushID(title);
+
+	ImGui::Columns(2);
+	ImGui::SetColumnWidth(0, 100);
+	ImGui::Text("%s", title);
+
+	ImGui::NextColumn();
+	ImGui::SetNextItemWidth(-1.0f);
+
+	bool dirty = false;
+	if(ImGui::DragFloat("##float", &flt, 0.1f, range.x, range.y, "%.2f"))
+		dirty = true;
+
+	ImGui::Columns(1);
+	ImGui::PopID();
+	return dirty;
+}
+
+bool inspect_vec3(const char* title, vec3& vector, bool is_unit = false)
+{
+	ImGui::PushID(title);
+
+	ImGui::Columns(2);
+	ImGui::SetColumnWidth(0, 100);
+	ImGui::Text("%s", title);
+
+	ImGui::NextColumn();
+	ImGui::SetNextItemWidth(-1.0f);
+
+	bool dirty = false;
+	if(ImGui::DragFloat3("##vec3", &vector.x, 0.1f, is_unit ? -1.0f : 0.0f, is_unit ? 1.0f : 0.0f, "%.2f"))
+		dirty = true;
+
+	ImGui::Columns(1);
+	ImGui::PopID();
+	return dirty;
+}
+
+bool inspect_quat(const char* title, Quaternion& quat)
+{
+	ImGui::PushID(title);
+
+	ImGui::Columns(2);
+	ImGui::SetColumnWidth(0, 100);
+	ImGui::Text("%s", title);
+
+	ImGui::NextColumn();
+	ImGui::SetNextItemWidth(-1.0f);
+
+	bool dirty = false;
+	if(ImGui::DragFloat4("##quat", &quat.x, 0.1f, -1.0f, 1.0f, "%.2f"))
+		dirty = true;
+
+	ImGui::Columns(1);
+	ImGui::PopID();
+	return dirty;
+}
+
 export class Inspector : public Widget
 {
 public:
@@ -60,18 +120,16 @@ private:
 	void inspect_transform(Transform& transform)
 	{
 		ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_DefaultOpen;
+
+			ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2{ 4, 4 });
 		if(ImGui::CollapsingHeader("Transform", flags))
 		{
 			bool dirty = false;
-			if(ImGui::DragFloat3("Translation", &transform.translation.x, 0.1f))
-				dirty = true;
-
-			if(ImGui::DragFloat4("Rotation", &transform.rotation.x, 0.01f, -1.0f, 1.0f))
-				dirty = true;
-
-			if(ImGui::DragFloat3("Scale", &transform.scale.x, 0.01f))
-				dirty = true;
+			dirty |= inspect_vec3("Translation", transform.translation);
+			dirty |= inspect_quat("Rotation", transform.rotation);
+			dirty |= inspect_vec3("Scale", transform.scale);
 		}
+		ImGui::PopStyleVar();
 	}
 
 	void inspect_camera(camera_component& camera)
@@ -85,7 +143,8 @@ private:
 
 			ImGui::Combo("Projection", reinterpret_cast<int*>(&camera.projection), "Perspective\0Orthographic\0\0");
 			ImGui::DragFloat("Vertical FOV", &camera.vertical_fov, 0.1f, 45.0f, 120.0f);
-
+			ImGui::DragFloat("Near plane", &camera.near_plane, 0.01f, 0.01f, 1.0f);
+			ImGui::DragFloat("Far plane", &camera.far_plane, 0.1f);
 		}
 	}
 
@@ -95,7 +154,7 @@ private:
 		{
 			ImGui::DragFloat3("Direction", &light.direction.x, 0.01f, -1.0f, 1.0f);
 			ImGui::ColorEdit3("Color", &light.color.x);
-			ImGui::DragFloat("Intensity", &light.intensity, 0.1f, 0.0f, 200000.0f, "%.0flx");
+			ImGui::DragFloat("Intensity", &light.intensity, 0.1f, 0.0f, 0.0f, "%.0flx");
 		}
 	}
 

@@ -42,7 +42,12 @@ public:
 			.irradiance = resource_manager_get_texture(envmap.irradiance).descriptor,
 			.prefiltered = resource_manager_get_texture(envmap.prefiltered).descriptor
 		});		
-		load_prefab(*world, "bistrov2");
+
+		vfs::path def_prefab = "bistrov2";
+		if(argc >= 2)
+			def_prefab = argv[1];
+
+		load_prefab(*world, def_prefab);
 	}
 
 	~Editor()
@@ -57,37 +62,82 @@ public:
 		
 	void variable_update(double dt)
 	{
-		auto vp_size = widget_viewport->get_size();
-		if(vp_size.x && vp_size.y)
+		if(!sim_running)
 		{
-			renderer_update_render_resolution(vp_size);	
-
-			if(last_vp_size != vp_size)
+			auto vp_size = widget_viewport->get_size();
+			if(vp_size.x && vp_size.y)
 			{
-				last_vp_size = vp_size;
-				
-				gpu_wait_idle();
-				gpu_free_descriptor(framebuffer);
-				gpu_destroy_texture(framebuffer_tex);
+				renderer_update_render_resolution(vp_size);
 
-				create_rendertarget();
+				if(last_vp_size != vp_size)
+				{
+					last_vp_size = vp_size;
+
+					gpu_wait_idle();
+					gpu_free_descriptor(framebuffer);
+					gpu_destroy_texture(framebuffer_tex);
+
+					create_rendertarget();
+				}
 			}
+
+			widget_viewport->update_render_target(&framebuffer);
+			renderer_set_output_rendertarget(framebuffer_tex);
+		}
+		else
+		{
+			if(window.is_key_down(SCANCODE_ESCAPE))
+			{
+				sim_running = false;
+				window.set_capture_mouse(false);
+			}
+
+			auto wdim = window.get_size();
+			renderer_update_render_resolution(wdim);
+
+			auto& camera_transform = world->entities.get<Transform>(world->main_camera);
+			auto rot = camera_transform.rotation;
+
+			auto delta = window.get_mouse_delta();
+
+			Quaternion yaw = Quaternion::from_axis_angle(vector_world_up, to_radians(-delta.x * 0.2f));
+			Quaternion pitch = Quaternion::from_axis_angle(vector_world_right, to_radians(-delta.y * 0.2f));
+			Quaternion new_rot = yaw * rot * pitch;
+			camera_transform.rotation = new_rot;
+
+			vec3 target_dir{0.0f};
+			vec3 front = vector_world_forward * Quaternion::make_mat3(new_rot);
+			vec3 right = vec3::normalize(vec3::cross(front, vector_world_up));
+			if(window.is_key_down(SCANCODE_W))
+				target_dir += front;
+			if(window.is_key_down(SCANCODE_S))
+				target_dir -= front;
+			if(window.is_key_down(SCANCODE_A))
+				target_dir -= right;
+			if(window.is_key_down(SCANCODE_D))
+				target_dir += right;
+
+			camera_transform.translation += (target_dir * 3.0f * dt);
 		}
 
 		update_main_camera();
-		widget_viewport->update_render_target(&framebuffer);
-		renderer_set_output_rendertarget(framebuffer_tex);
 		update_env();
 	}
 
 	void draw_ui()
 	{
+		if(sim_running)
+		{
+			ui::draw_device_overlay();
+			return;
+		}
+
 		auto window_flags = 
 			ImGuiWindowFlags_MenuBar		| 
 			ImGuiWindowFlags_NoDocking		| 
 			ImGuiWindowFlags_NoTitleBar		| 
 			ImGuiWindowFlags_NoCollapse		|
-				ImGuiWindowFlags_NoResize		|
+			ImGuiWindowFlags_NoResize		|
 			ImGuiWindowFlags_NoMove			|
 			ImGuiWindowFlags_NoBringToFrontOnFocus	|
 			ImGuiWindowFlags_NoNavFocus;
@@ -177,6 +227,15 @@ private:
 	{
 		if(ImGui::BeginMenuBar())
 		{
+			if(ImGui::Button("Run"))
+			{
+				sim_running = true;
+				auto wdim = window.get_size();
+				renderer_update_render_resolution(wdim);
+				renderer_set_output_rendertarget(GPUTexture{0});
+				window.set_capture_mouse(true);
+			}
+
 			if(ImGui::BeginMenu("Tools"))
 			{
 				ImGui::EndMenu();
@@ -243,6 +302,8 @@ private:
 	uvec2 last_vp_size{800u, 600u};
 	GPUTexture framebuffer_tex;
 	GPUTextureDescriptor framebuffer;
+
+	bool sim_running = false;
 };
 
 }
