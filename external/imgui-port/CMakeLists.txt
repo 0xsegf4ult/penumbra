@@ -8,7 +8,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 FetchContent_Declare(imgui URL https://github.com/ocornut/imgui/archive/refs/tags/v1.92.5-docking.zip)
 FetchContent_MakeAvailable(imgui)
 
-FetchContent_Declare(imguizmo GIT_REPOSITORY https://github.com/CedricGuillemet/ImGuizmo GIT_TAG a15acd87a3f3241a29ea1363ceafc680dca3a96b)
+FetchContent_Declare(imguizmo GIT_REPOSITORY https://github.com/0xsegf4ult/ImGuizmo-reverseZ GIT_TAG 8b4259737c09c2a22c9b5136e82d2837e0f4542c)
 FetchContent_MakeAvailable(imguizmo)
 
 add_library(imgui-port STATIC)
