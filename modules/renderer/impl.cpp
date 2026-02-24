@@ -116,6 +116,7 @@ struct renderer_context_t
 	GPUTextureDescriptor hdrbuffer;
 	GPUTextureDescriptor hdrbuffer_rw;
 	GPUTexture output_rt{0u}; 
+	int tonemapper{1};
 
 	GPUPipeline visbuffer_build_pso;
 	GPUPipeline visbuffer_build_alphamask_pso;
@@ -789,8 +790,10 @@ void renderer_process_frame(double dt)
 	struct HDRComposeData
 	{
 		uint32_t hdrbuffer_handle;
+		int tonemapper;
 	} compose_data;
 	compose_data.hdrbuffer_handle = renderer->hdrbuffer.handle;
+	compose_data.tonemapper = renderer->tonemapper;
 
 	if(renderer->output_rt)
 	{
