@@ -47,6 +47,11 @@ struct ResourceHandle<T> where T: IOpaqueDescriptor
         }
 };
 
+#define SAMPLER_LINEAR_REPEAT 0u
+#define SAMPLER_LINEAR_CLAMP 1u
+#define SAMPLER_ANISO_REPEAT 2u
+#define SAMPLER_COMPARE_BORDER 3u
+
 uint SubgroupID()
 {
 	return spirv_asm

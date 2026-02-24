@@ -37,7 +37,7 @@ VSOutput vertexMain(uniform VSInput input, uint index : SV_VulkanVertexID, uint 
 [shader("fragment")]
 uint fragmentMain(VSOutput input, uniform VSInput data, uint primitive : SV_PrimitiveID) : SV_Target0
 {
-	ResourceHandle<SamplerState> smp_aniso = {1u};
+	ResourceHandle<SamplerState> smp_aniso = {SAMPLER_ANISO_REPEAT};
 	Ptr<MaterialPBR, Access.Read> material = data.materials + WaveReadLaneFirst(input.material);
 	float alpha = nonuniform(material->albedo.desc)->Sample(smp_aniso.desc, input.uv).a;
 	if(alpha < material->alpha_cf)

@@ -169,10 +169,10 @@ private:
 		framebuffer_tex = gpu_create_texture
 		({
 			.dim = uvec3{last_vp_size, 1u},
-			.format = GPU_FORMAT_RGBA8_SRGB,
+			.format = GPU_FORMAT_BGRA8_SRGB,
 		       	.usage = GPU_TEXTURE_SAMPLED | GPU_TEXTURE_COLOR_ATTACHMENT	
 		});
-		framebuffer = gpu_texture_view_descriptor(framebuffer_tex, {.format = GPU_FORMAT_RGBA8_SRGB});
+		framebuffer = gpu_texture_view_descriptor(framebuffer_tex, {.format = GPU_FORMAT_BGRA8_SRGB});
 
 		auto cmd = gpu_record_commands(GPU_QUEUE_GRAPHICS);
 		gpu_texture_layout_transition(cmd, framebuffer_tex, GPU_STAGE_NONE, GPU_STAGE_RASTER_COLOR_OUTPUT, GPU_TEXTURE_LAYOUT_UNDEFINED, GPU_TEXTURE_LAYOUT_GENERAL);

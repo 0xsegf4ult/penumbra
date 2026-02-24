@@ -300,6 +300,16 @@ void renderer_init(Window& wnd)
 		.mag_filter = GPU_FILTER_LINEAR,
 		.min_filter = GPU_FILTER_LINEAR,
 		.mip_filter = GPU_FILTER_LINEAR,
+		.address_mode_u = GPU_ADDRESS_MODE_CLAMP_TO_EDGE,
+		.address_mode_v = GPU_ADDRESS_MODE_CLAMP_TO_EDGE,
+		.address_mode_w = GPU_ADDRESS_MODE_CLAMP_TO_EDGE
+	});
+
+	gpu_create_sampler
+	({
+		.mag_filter = GPU_FILTER_LINEAR,
+		.min_filter = GPU_FILTER_LINEAR,
+		.mip_filter = GPU_FILTER_LINEAR,
 		.address_mode_u = GPU_ADDRESS_MODE_REPEAT,
 		.address_mode_v = GPU_ADDRESS_MODE_REPEAT,
 		.address_mode_w = GPU_ADDRESS_MODE_REPEAT,
@@ -327,7 +337,7 @@ void renderer_init(Window& wnd)
 
 	renderer->hdr_compose_pso = gpu_create_graphics_pipeline(load_shader("shaders/hdr_compose"),
 	{
-		.color_targets = {GPU_FORMAT_RGBA8_SRGB}
+		.color_targets = {GPU_FORMAT_BGRA8_SRGB}
 	});
 
 	renderer->shadowmap_opaque_pso = gpu_create_graphics_pipeline(load_shader("shaders/shadowmap_opaque"),

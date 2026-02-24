@@ -50,7 +50,7 @@ float interleavedGradientNoise(float2 pos)
 
 float filterPCF(uint sm_index, float4 posLS, float2 svpos)
 {
-	ResourceHandle<SamplerComparisonState> sm_shadow = {2u};
+	ResourceHandle<SamplerComparisonState> sm_shadow = {SAMPLER_COMPARE_BORDER};
 	float dx = consts.csm_scale * (0.25 * (3 - sm_index)) * 2.5f;
 	float factor = 0.0;
 
@@ -194,7 +194,7 @@ void computeMain(uint groupIndex : SV_GroupIndex, uint2 Gid : SV_GroupID, unifor
 	float2 uv_dy = uvs - attribute_at_bary(uv0, uv1, uv2, bary_quad_y);
 	float3 V = normalize(consts.cam_pos.xyz - p);
 	
-	ResourceHandle<SamplerState> smp_aniso = {1u};
+	ResourceHandle<SamplerState> smp_aniso = {SAMPLER_ANISO_REPEAT};
 	float3 albedo = (mtl.albedo.valid() ? nonuniform(mtl.albedo.desc)->SampleGrad(smp_aniso.desc, uvs, uv_dx, uv_dy).xyz : float3(1.0)) * mtl.diffuse_factor.xyz;
 	float3 emissive = (mtl.emissive.valid() ? nonuniform(mtl.emissive.desc)->SampleGrad(smp_aniso.desc, uvs, uv_dx, uv_dy).xyz : float3(1.0)) * mtl.emissive_factor.xyz;
 	float3 physical = mtl.mro.valid() ? nonuniform(mtl.mro.desc)->SampleGrad(smp_aniso.desc, uvs, uv_dx, uv_dy).xyz : float3(1.0, 1.0, 0.0);
@@ -237,7 +237,8 @@ void computeMain(uint groupIndex : SV_GroupIndex, uint2 Gid : SV_GroupID, unifor
 	float3 f0 = float3(reflectance * (1.0 - metallic)) + albedo * metallic;
 	float3 f90 = saturate(50.0 * f0);
 
-	float2 envBRDF = consts.brdf.desc->SampleLevel(smp.desc, float2(max(NdotV, 0.0), roughness), 0);
+	ResourceHandle<SamplerState> smp_clamp = {SAMPLER_LINEAR_CLAMP};
+	float2 envBRDF = consts.brdf.desc->SampleLevel(smp_clamp.desc, float2(max(NdotV, 0.0), roughness), 0);
 
 	float3 reflection = reflect(-V, N);
 	float3 amb_PFC = consts.prefiltered.desc->SampleLevel(smp.desc, reflection, roughness * 8.0) * consts.ambient_factor;
