@@ -17,7 +17,7 @@ import :widget;
 import :viewport;
 export import :world_state;
 
-using std::uint32_t;
+using std::uint32_t, std::size_t;
 
 namespace penumbra
 {
@@ -37,6 +37,7 @@ public:
 		widgets.push_back(std::make_unique<Inspector>(world));
 
 		auto envmap = load_envmap("hdri/kloppenheim");
+		//auto envmap = load_envmap("hdri/kloppenheim_night");
 		renderer_set_envmap
 		(RenderEnvironmentMap{
 			.irradiance = resource_manager_get_texture(envmap.irradiance).descriptor,
@@ -57,7 +58,6 @@ public:
 
 	void fixed_update(double dt)
 	{
-
 	}
 		
 	void variable_update(double dt)
@@ -120,6 +120,7 @@ public:
 			camera_transform.translation += (target_dir * 3.0f * dt);
 		}
 
+		update_transforms();
 		update_main_camera();
 		update_env();
 	}
@@ -179,12 +180,44 @@ private:
 		gpu_submit(GPU_QUEUE_GRAPHICS, cmd);
 	}
 
+	void update_entity_subtree(ecs::entity entity, mat4 matrix_world)
+	{
+		auto* robj = world->entities.try_get<render_object_component>(entity);
+		if(robj)
+		{
+			renderer_world_update_object(robj->renderer_objectID, matrix_world);
+		}
+		
+		entity_relationship& re = world->entities.get<entity_relationship>(entity);
+		ecs::entity child = re.first_child;
+		while(world->entities.valid(child))
+		{
+			update_entity_subtree(child, world->entities.get<Transform>(child).as_matrix() * matrix_world);
+			child = world->entities.get<entity_relationship>(child).next_sibling;
+		}
+	}
+
+	void update_transforms()
+	{
+		for(auto [entity] : world->entities.view<transform_dirty_t>().each())
+		{
+			auto wm = get_entity_world_matrix(world->entities, entity);
+			
+			update_entity_subtree(entity, wm);
+
+			world->entities.remove<transform_dirty_t>(entity);
+		}
+	}
+
 	void update_main_camera()
 	{
 		auto& camera_transform = world->entities.get<Transform>(world->main_camera);
 		auto& camera = world->entities.get<camera_component>(world->main_camera);
 		auto res = renderer_get_render_resolution();
 
+		/*camera.aperture = 1.4f;
+		camera.shutter_speed = 2.4f;
+*/
 		const float near = camera.near_plane;
 
 		const float focal_length = 1.0f / std::tan(to_radians(camera.vertical_fov) / 2.0f);
@@ -219,7 +252,8 @@ private:
 		({
 			dlight.direction,
 			dlight.color,
-			dlight.intensity
+			dlight.intensity,
+			1200.0f
 		});
 	}
 

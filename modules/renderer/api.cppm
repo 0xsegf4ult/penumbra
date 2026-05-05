@@ -63,6 +63,9 @@ export struct RenderEnvironmentData
 	vec3 light_direction;
 	vec3 light_color;
 	float light_intensity;
+	float ambient_intensity;
+};
+
 };
 
 export struct VisbufferInfo

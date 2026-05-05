@@ -2,9 +2,19 @@
 
 #include "globals.slang"
 
+[Flags]
+enum MaterialFlags : uint
+{
+	AlphaMask,
+	AlphaBlend,
+	DoubleSided,
+	Clearcoat,
+	Anisotropy
+};	
+
 struct MaterialPBR
 {
-	float3 diffuse_factor;
+	float4 albedo_factor;
 	float roughness_factor;
 	float metallic_factor;
 	float normal_factor;
@@ -45,5 +55,10 @@ float GeometrySmith(float NdotV, float NdotL, float roughness)
 
 float3 fresnelSchlick(float HdotV, float3 f0)
 {
-	return f0 + (1.0 - f0) * pow(1.0 - HdotV, 5.0);
+	return f0 + (1.0 - f0) * pow5(1.0 - HdotV);
+}
+
+float F_Schlick(float f0, float f90, float HdotV)
+{
+	return f0 + (f90 - f0) * pow5(1.0 - HdotV);
 }

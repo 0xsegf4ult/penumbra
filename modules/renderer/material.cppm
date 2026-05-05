@@ -12,12 +12,14 @@ export enum RenderMaterialFlags : uint32_t
 {
 	RENDER_MATERIAL_ALPHA_MASK = 0x1,
 	RENDER_MATERIAL_ALPHA_BLEND = 0x2,
-	RENDER_MATERIAL_DOUBLESIDED = 0x4
+	RENDER_MATERIAL_DOUBLESIDED = 0x4,
+	RENDER_MATERIAL_CLEARCOAT = 0x8,
+	RENDER_MATERIAL_ANISOTROPIC = 0x10
 };
 
 export struct RenderMaterialFactors
 {
-	vec3 diffuse{1.0f};
+	vec4 albedo{1.0f};
 	float roughness{1.0f};
 	float metallic{1.0f};
 	float normal{1.0f};

@@ -1,3 +1,7 @@
+module;
+
+#include <cassert>
+
 export module penumbra.editor:prefab;
 
 import :world_state;
@@ -129,7 +133,7 @@ export void load_prefab(WorldState& world, const vfs::path& path)
 			.name = (mtl.name > 0) ? read_string_table(mtl.name) : std::format("material_pbr_{}", i),
 			.factors = 
 			{
-				.diffuse = mtl.diffuse_factor,
+				.albedo = vec4{mtl.diffuse_factor, 1.0f},
 				.roughness = mtl.roughness_factor,
 				.metallic = mtl.metallic_factor,
 				.normal = mtl.normal_factor,
@@ -151,8 +155,10 @@ export void load_prefab(WorldState& world, const vfs::path& path)
 	ecs::entity root_entity = world.spawn(path.string());
 	add_entity_as_child(graph, world.root, root_entity);
 
-	std::map<uint32_t, ecs::entity> node_map;
+	std::vector<ecs::entity> node_map(header->node_table_count + 1);
+	std::vector<mat4> node_matrix_world(header->node_table_count + 1);
 	node_map[0] = root_entity;
+	node_matrix_world[0] = mat4::identity();
 
 	for(uint32_t i = 0; i < header->node_table_count; i++)
 	{
@@ -160,7 +166,9 @@ export void load_prefab(WorldState& world, const vfs::path& path)
 
 		ecs::entity node_ent = world.spawn(node.name > 0 ? read_string_table(node.name) : std::format("node_{}", i));
 
-		Transform ntx = Transform{node.translation, node.rotation, node.scale} * graph.get<Transform>(node_map[node.parent]);
+		Transform ntx = Transform{node.translation, node.rotation, node.scale};
+		mat4 matrix_world = ntx.as_matrix() * node_matrix_world[node.parent];
+		node_matrix_world[i + 1] = matrix_world;	
 
 		graph.emplace<Transform>(node_ent, ntx);
 		add_entity_as_child(graph, node_map[node.parent], node_ent);
@@ -174,7 +182,7 @@ export void load_prefab(WorldState& world, const vfs::path& path)
 			const auto* cmp = reinterpret_cast<const PrefabFileFormat::Component*>(cptr);
 			switch(cmp->type)
 			{
-			case PrefabFileFormat::ComponentType::STATIC_MESH:
+			case PrefabFileFormat::ComponentType::STATIC_MESH:	
 			{
 				const auto* smc = reinterpret_cast<const PrefabFileFormat::StaticMeshComponent*>(cptr);
 				ResourceID geom;
@@ -231,19 +239,24 @@ export void load_prefab(WorldState& world, const vfs::path& path)
 					shadow_levels = 0;
 
 				auto& geom_data = resource_manager_get_geometry(geom);
+				
+				auto vtx_offset = geom_data.vertex_offset;
+
 				auto rd_object = renderer_world_insert_object
 				({
-				 	ntx,
-					bucket,
+					matrix_world,
+				 	bucket,
 					geom_data.sphere,
 					material.get_handle(),
 					geom_data.l0_cluster_count,
 					geom_data.lod_offset,
-					geom_data.lod_count
+					geom_data.lod_count,
+					vtx_offset,
+					geom_data.index_offset,
+					geom_data.cluster_offset
 				}, shadow_levels);
 
 				graph.emplace<render_object_component>(node_ent, geom, material, rd_object);
-				
 				cptr += sizeof(PrefabFileFormat::StaticMeshComponent);
 				break;
 			}

@@ -49,6 +49,7 @@ struct TextureWriteRequest
 struct VisbufferCBuffer
 {
 	mat4 camera;
+	mat4 view;
 	mat4 inverse_projection;
 	mat4 inverse_view;
 	vec4 cam_pos;
@@ -95,6 +96,7 @@ struct renderer_context_t
 	std::array<uint64_t, config::renderer_frames_in_flight> gfx_queue_frames;
 	std::array<uint64_t, config::renderer_frames_in_flight> compute_queue_frames;
 	int frame_index;
+	uint32_t frame_counter{0};
 
 	std::array<GPUSemaphore, config::renderer_frames_in_flight> swapchain_acquire;
 	std::array<GPUSemaphore, config::renderer_frames_in_flight> swapchain_present;
@@ -141,12 +143,13 @@ struct renderer_context_t
 
 	vec3 light_direction;
 	vec3 light_color;
+	float ambient_intensity;
 	RenderEnvironmentMap envmap;
 
 	GPUPipeline shadowmap_opaque_pso;
 	GPUPipeline shadowmap_alphamask_pso;
 
-	uint32_t csm_max_cascades = 3;
+	uint32_t csm_max_cascades = 3u;
 	float csm_lambda{0.9f};
 	float csm_cbias{0.00125f};
 	float csm_nbias{0.275f};
@@ -263,7 +266,7 @@ void renderer_init(Window& wnd)
 	gpu_init();
 	gpu_swapchain_init(wnd);
 	renderer->frame_index = 0;
-	
+
 	for(int i = 0; i < config::renderer_frames_in_flight; i++)
 	{
 		renderer->gfx_queue_frames[i] = 0;
@@ -440,6 +443,7 @@ void renderer_next_frame()
 
 	gpu_wait_queue(GPU_QUEUE_COMPUTE, renderer->compute_queue_frames[renderer->frame_index]);
 	renderer->cur_swapchain = gpu_swapchain_acquire_next(renderer->swapchain_acquire[renderer->frame_index]);
+	renderer->frame_counter++;
 }
 
 void renderer_copy_resources_async()
@@ -1012,11 +1016,12 @@ void renderer_update_camera(const RenderCameraData& cam)
 {
 	VisbufferCBuffer* vbconst = reinterpret_cast<VisbufferCBuffer*>(gpu_map_memory(renderer->visbuffer_cbv[renderer->frame_index]));
 	vbconst->camera = cam.view * cam.proj;
+	vbconst->view = cam.view;
 	vbconst->inverse_projection = mat4::inverse(cam.proj);
 	vbconst->inverse_view = mat4::inverse(cam.view);
 	vbconst->cam_pos = vec4{cam.position, 1.0f};
 	vbconst->exposure = cam.exposure;
-	vbconst->ambient_factor = 1200.0f;
+	vbconst->ambient_factor = renderer->ambient_intensity;
 
 	renderer->render_world.update_view_camera(renderer->camera_view, cam);
 	renderer_update_cascades(vbconst, cam);
@@ -1026,6 +1031,7 @@ void renderer_update_environment(const RenderEnvironmentData& env)
 {
 	renderer->light_direction = env.light_direction;
 	renderer->light_color = env.light_color * env.light_intensity;
+	renderer->ambient_intensity = env.ambient_intensity;
 }
 
 void renderer_add_visbuffer_hook(visbuffer_read_hook&& hook)

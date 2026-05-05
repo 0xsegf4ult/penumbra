@@ -26,7 +26,10 @@ public:
 		ecs::entity cur = world->entities.get<entity_relationship>(world->root).first_child;
 		while(world->entities.valid(cur))
 		{
-			tree_draw(cur, ctr);
+			auto wants_delete = tree_draw(cur, ctr);
+			if(wants_delete)
+				break;
+
 			cur = world->entities.get<entity_relationship>(cur).next_sibling;
 		}
 
@@ -45,7 +48,7 @@ public:
 		}
 	}
 private:
-	void tree_draw(ecs::entity ent, uint32_t& ctr)
+	bool tree_draw(ecs::entity ent, uint32_t& ctr)
 	{
 		auto& graph = world->entities;
 
@@ -54,8 +57,12 @@ private:
 
 		ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_OpenOnArrow;
 
+		bool leaf = false;
 		if(ctr != 0 && !graph.valid(graph.get<entity_relationship>(ent).first_child))
+		{
+			leaf = true;
 			flags |= ImGuiTreeNodeFlags_Leaf;
+		}
 
 		if(world->selected_entity == ent)
 			flags |= ImGuiTreeNodeFlags_Selected;
@@ -69,7 +76,7 @@ private:
 		if(ImGui::BeginPopupContextItem())
 		{
 			bool is_protected = (ent == world->main_camera) || (ent == world->env);
-			ImGui::BeginDisabled(is_protected);
+			ImGui::BeginDisabled(is_protected || leaf);
 			if(ImGui::MenuItem("Delete"))
 				wants_delete = true;
 			ImGui::EndDisabled();
@@ -82,22 +89,30 @@ private:
 			ecs::entity cur = graph.get<entity_relationship>(ent).first_child;
 			while(graph.valid(cur))
 			{
-				tree_draw(cur, ctr);
+				auto wants_delete = tree_draw(cur, ctr);
+				if(wants_delete)
+					break;
+
 				cur = graph.get<entity_relationship>(cur).next_sibling;
 			}
 
 			ImGui::TreePop();
 		}
+		
 
 		if(wants_delete)
 		{
 			if(world->selected_entity == ent)
 				world->selected_entity = ecs::null;
 
-			//graph.destroy(ent);
-		}
+			unlink_entity(graph, ent);
 
+			graph.destroy(ent);
+		}
+		
 		ImGui::PopID();
+
+		return wants_delete;
 	}
 
 	WorldState* world{nullptr};

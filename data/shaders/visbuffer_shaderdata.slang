@@ -5,6 +5,7 @@
 struct VisbufferConstants
 {
 	float4x4 camera;
+	float4x4 view;
 	float4x4 inverse_projection;
 	float4x4 inverse_view;
 	float4 cam_pos;

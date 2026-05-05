@@ -39,7 +39,7 @@ uint fragmentMain(VSOutput input, uniform VSInput data, uint primitive : SV_Prim
 {
 	ResourceHandle<SamplerState> smp_aniso = {SAMPLER_ANISO_REPEAT};
 	Ptr<MaterialPBR, Access.Read> material = data.materials + WaveReadLaneFirst(input.material);
-	float alpha = nonuniform(material->albedo.desc)->Sample(smp_aniso.desc, input.uv).a;
+	float alpha = nonuniform(material->albedo.desc)->Sample(smp_aniso.desc, input.uv).a * material->albedo_factor.a;
 	if(alpha < material->alpha_cf)
 		discard;
 
