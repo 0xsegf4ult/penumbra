@@ -1,5 +1,5 @@
-export module penumbra.gpu;
-export import :shader;
+export module penumbra.gpu:api;
+import :shader;
 
 import penumbra.core;
 import penumbra.math;
@@ -16,8 +16,8 @@ enum GPUBufferUsage { GPU_BUFFER_INVALID, GPU_BUFFER_STORAGE, GPU_BUFFER_UNIFORM
 enum GPUTextureType { GPU_TEXTURE_1D, GPU_TEXTURE_2D, GPU_TEXTURE_3D, GPU_TEXTURE_CUBE, GPU_TEXTURE_2D_ARRAY };
 enum GPUFormat { GPU_FORMAT_UNDEFINED, GPU_FORMAT_R8_UNORM, GPU_FORMAT_RG8_UNORM, GPU_FORMAT_RGBA8_UNORM,
 		GPU_FORMAT_RGBA8_SRGB, GPU_FORMAT_BGRA8_SRGB, GPU_FORMAT_RG16_SFLOAT, GPU_FORMAT_D16_UNORM, 
-		GPU_FORMAT_D32_SFLOAT, GPU_FORMAT_R32_UINT, GPU_FORMAT_B10GR11_UFLOAT, GPU_FORMAT_BC4_UNORM, 
-		GPU_FORMAT_BC5_UNORM, GPU_FORMAT_BC6H_UFLOAT, GPU_FORMAT_BC7_UNORM, GPU_FORMAT_BC7_SRGB };
+		GPU_FORMAT_D32_SFLOAT, GPU_FORMAT_R32_UINT, GPU_FORMAT_B10GR11_UFLOAT, GPU_FORMAT_RGBA16_SFLOAT, 
+		GPU_FORMAT_BC4_UNORM, GPU_FORMAT_BC5_UNORM, GPU_FORMAT_BC6H_UFLOAT, GPU_FORMAT_BC7_UNORM, GPU_FORMAT_BC7_SRGB };
 enum GPUTextureLayout { GPU_TEXTURE_LAYOUT_UNDEFINED, GPU_TEXTURE_LAYOUT_GENERAL, GPU_TEXTURE_LAYOUT_PRESENT };
 enum GPUFilter { GPU_FILTER_NEAREST, GPU_FILTER_LINEAR };
 enum GPUAddressMode { GPU_ADDRESS_MODE_REPEAT, GPU_ADDRESS_MODE_MIRRORED_REPEAT, GPU_ADDRESS_MODE_CLAMP_TO_EDGE, GPU_ADDRESS_MODE_CLAMP_TO_BORDER };
@@ -298,6 +298,7 @@ void gpu_bind_index_buffer(const GPUCommandBuffer& cmd, const GPUPointer& buffer
 
 void gpu_draw(const GPUCommandBuffer& cmd, void* data, uint32_t vertex_count, uint32_t instance_count, uint32_t base_vertex, uint32_t base_instance);
 void gpu_draw_indexed(const GPUCommandBuffer& cmd, void* data, uint32_t index_count, uint32_t instance_count, uint32_t base_index, uint32_t base_vertex, uint32_t base_instance);
+void gpu_draw_indirect(const GPUCommandBuffer& cmd, void* data, const GPUPointer& commands, uint32_t draw_count);
 void gpu_draw_indexed_indirect_count(const GPUCommandBuffer& cmd, void* data, const GPUPointer& commands, const GPUPointer& draw_count, uint32_t max_draw_count);
 
 void gpu_swapchain_init(Window& wnd);

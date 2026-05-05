@@ -7,6 +7,8 @@ target_link_libraries(penumbra_gpu PRIVATE volk penumbra_core penumbra_math SDL3
 target_sources(penumbra_gpu PUBLIC FILE_SET CXX_MODULES
 	FILES
 	api.cppm
+	mod.cppm
 	shader.cppm
+	utility.cppm
 	PRIVATE
 	impl_vulkan.cpp)     

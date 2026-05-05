@@ -119,6 +119,8 @@ constexpr VkFormat format_to_vk(GPUFormat fmt)
 		return VK_FORMAT_R32_UINT;
 	case GPU_FORMAT_B10GR11_UFLOAT:
 		return VK_FORMAT_B10G11R11_UFLOAT_PACK32;
+	case GPU_FORMAT_RGBA16_SFLOAT:
+		return VK_FORMAT_R16G16B16A16_SFLOAT;
 	case GPU_FORMAT_BC4_UNORM:
 		return VK_FORMAT_BC4_UNORM_BLOCK;
 	case GPU_FORMAT_BC5_UNORM:
@@ -179,52 +181,6 @@ constexpr VkImageUsageFlags image_usage_to_vk(GPUTextureUsage usage)
 		res |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
 
 	return res;
-}
-
-constexpr uint32_t format_blockdim(GPUFormat fmt)
-{
-	switch(fmt)
-	{
-	case GPU_FORMAT_BC5_UNORM:
-	case GPU_FORMAT_BC6H_UFLOAT:
-	case GPU_FORMAT_BC7_UNORM:
-	case GPU_FORMAT_BC7_SRGB:
-		return 4u;
-	default:
-		return 1u;
-	}
-}
-
-constexpr uint32_t format_blocksize(GPUFormat fmt)
-{
-	switch(fmt)
-	{
-	case GPU_FORMAT_BC5_UNORM:
-	case GPU_FORMAT_BC6H_UFLOAT:
-	case GPU_FORMAT_BC7_UNORM:
-	case GPU_FORMAT_BC7_SRGB:
-		return 16u;
-	case GPU_FORMAT_R32_UINT:
-	case GPU_FORMAT_RG16_SFLOAT:
-	case GPU_FORMAT_RGBA8_SRGB:
-	case GPU_FORMAT_RGBA8_UNORM:
-	case GPU_FORMAT_BGRA8_SRGB:
-	case GPU_FORMAT_B10GR11_UFLOAT:
-		return 4u;
-	case GPU_FORMAT_RG8_UNORM:
-		return 2u;
-	default:
-		return 1u;
-	}
-}
-
-constexpr uint32_t size_for_image(uint32_t w, uint32_t h, uint32_t d, GPUFormat fmt)
-{
-	auto bdim = format_blockdim(fmt);
-	auto wb = std::max(w / bdim, 1u);
-	auto hb = std::max(h / bdim, 1u);
-	auto db = std::max(d / bdim, 1u);
-	return wb * hb * db * format_blocksize(fmt);
 }
 
 constexpr VkFilter filter_to_vk(GPUFilter filter)
@@ -2664,6 +2620,21 @@ void gpu_draw_indexed(const GPUCommandBuffer& cmd, void* data, uint32_t index_co
 		vkCmdPushConstants(cb, std::bit_cast<VkPipelineLayout>(cmd.bound_pipe->layout), cmd.bound_pipe->pconst_stage, 0, cmd.bound_pipe->pconst_size, data);
 
 	vkCmdDrawIndexed(cb, index_count, instance_count, base_index, base_vertex, base_instance);
+}
+
+void gpu_draw_indirect(const GPUCommandBuffer& cmd, void* data, const GPUPointer& commands, uint32_t draw_count)
+{
+	assert(cmd.bound_pipe);
+	assert(!cmd.bound_pipe->is_compute);
+	assert(commands.handle);
+	auto cb = std::bit_cast<VkCommandBuffer>(cmd.handle);
+	auto& commands_buffer = gpu_context->buffers[commands.handle - 1];
+	assert(commands.offset + (draw_count * sizeof(GPUIndirectCommand)) <= commands_buffer.size);
+
+	if(data && cmd.bound_pipe->pconst_size)
+		vkCmdPushConstants(cb, std::bit_cast<VkPipelineLayout>(cmd.bound_pipe->layout), cmd.bound_pipe->pconst_stage, 0, cmd.bound_pipe->pconst_size, data);
+
+	vkCmdDrawIndirect(cb, commands_buffer.handle, commands.offset, draw_count, sizeof(GPUIndirectCommand));
 }
 
 void gpu_draw_indexed_indirect_count(const GPUCommandBuffer& cmd, void* data, const GPUPointer& commands, const GPUPointer& draw_count, uint32_t max_draw_count)
