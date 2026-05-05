@@ -2675,13 +2675,13 @@ void gpu_draw_indexed_indirect_count(const GPUCommandBuffer& cmd, void* data, co
 	auto cb = std::bit_cast<VkCommandBuffer>(cmd.handle);
 	auto& commands_buffer = gpu_context->buffers[commands.handle - 1];
 	auto& draw_count_buffer = gpu_context->buffers[draw_count.handle - 1];
-	assert(commands.offset + (max_draw_count * sizeof(GPUIndirectCommand)) <= commands_buffer.size);
+	assert(commands.offset + (max_draw_count * sizeof(GPUIndexedIndirectCommand)) <= commands_buffer.size);
 	assert(draw_count.offset + sizeof(uint32_t) <= draw_count_buffer.size);
 
 	if(data && cmd.bound_pipe->pconst_size)
 		vkCmdPushConstants(cb, std::bit_cast<VkPipelineLayout>(cmd.bound_pipe->layout), cmd.bound_pipe->pconst_stage, 0, cmd.bound_pipe->pconst_size, data);
 
-	vkCmdDrawIndexedIndirectCount(cb, commands_buffer.handle, commands.offset, draw_count_buffer.handle, draw_count.offset, max_draw_count, sizeof(GPUIndirectCommand));
+	vkCmdDrawIndexedIndirectCount(cb, commands_buffer.handle, commands.offset, draw_count_buffer.handle, draw_count.offset, max_draw_count, sizeof(GPUIndexedIndirectCommand));
 }
 
 VkSurfaceFormatKHR choose_swapchain_format(std::span<VkSurfaceFormatKHR> formats)

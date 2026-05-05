@@ -31,6 +31,13 @@ struct StreamBuffer
 	std::vector<Chunk> chunks;
 };
 
+struct BufferWriteRequest
+{
+	GPUPointer src;
+	GPUPointer dst;
+	size_t size;
+};
+
 struct TextureWriteRequest
 {
 	GPUPointer data;
@@ -107,6 +114,7 @@ struct renderer_context_t
 	RenderMaterialStorage materials;
 	StreamBuffer stream_buffer;
 	std::vector<TextureWriteRequest> texwrites;
+	std::vector<BufferWriteRequest> bufwrites;
 
 	GPUTexture visbuffer_tex;
 	GPUTexture depthbuffer_tex;
@@ -443,7 +451,7 @@ void renderer_copy_resources_async()
 			chunk.head = 0;
 	}
 
-	if(!renderer_geometry_needs_upload() && renderer->texwrites.empty())
+	if(!renderer_geometry_needs_upload() && renderer->texwrites.empty() && renderer->bufwrites.empty())
 		return;
 
 	auto cmd = gpu_record_commands(GPU_QUEUE_TRANSFER);
@@ -452,6 +460,12 @@ void renderer_copy_resources_async()
 	{
 		renderer_geometry_copy_async(cmd);
 	}
+
+	for(auto& write : renderer->bufwrites)
+	{
+		gpu_mem_copy(cmd, write.src, write.dst, write.size); 
+	}
+	renderer->bufwrites.clear();
 
 	for(auto& write : renderer->texwrites)
 	{
@@ -967,6 +981,11 @@ RenderObject renderer_world_insert_object(const RenderObjectDescription& data, u
 	shadow_level = std::min(shadow_level, renderer->csm_max_cascades);
 
 	return renderer->render_world.insert_object(data, {views.data(), shadow_level + 1u});
+}
+
+void renderer_world_update_object(RenderObject handle, const mat4& transform)
+{
+	renderer->render_world.update_object(handle, transform);
 }
 
 RenderBucketData renderer_world_get_bucket(RenderView view, RenderBucket bucket)

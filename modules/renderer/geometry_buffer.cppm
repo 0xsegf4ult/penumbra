@@ -130,6 +130,16 @@ export uint32_t renderer_geometry_push_vertices(const geom_position_format* pos_
 	return offset;
 }	
 
+export uint32_t renderer_geometry_reserve_vertices(uint32_t count)
+{
+	auto offset = state.host_vertex_count;
+	if(offset + count >= state.vertex_capacity)
+		log::warn("renderer_geometry_buffer: out of vertex memory!");
+
+	state.host_vertex_count += count;
+	return offset;
+}
+
 export uint32_t renderer_geometry_push_indices(const geom_index_format* data, uint32_t count)
 {
 	auto offset = state.host_index_count;
@@ -174,30 +184,37 @@ export void renderer_geometry_copy_async(GPUCommandBuffer& cmd)
 	auto vdiff = state.host_vertex_count - state.resident_vertex_count;
 	if (vdiff)
 	{
-		gpu_mem_copy(cmd, state.host_vertex_pos + state.resident_vertex_count, state.vertex_pos + state.resident_vertex_count, vdiff * sizeof(geom_position_format));
-		gpu_mem_copy(cmd, state.host_vertex_uv + state.resident_vertex_count, state.vertex_uv + state.resident_vertex_count, vdiff * sizeof(geom_uv_format));
-		gpu_mem_copy(cmd, state.host_vertex_nor_tan + state.resident_vertex_count, state.vertex_nor_tan + state.resident_vertex_count, vdiff * sizeof(geom_nor_tan_format));
+		auto poffset = state.resident_vertex_count * sizeof(geom_position_format);
+		auto uoffset = state.resident_vertex_count * sizeof(geom_uv_format);
+		auto noffset = state.resident_vertex_count * sizeof(geom_nor_tan_format);
+
+		gpu_mem_copy(cmd, state.host_vertex_pos + poffset, state.vertex_pos + poffset, vdiff * sizeof(geom_position_format));
+		gpu_mem_copy(cmd, state.host_vertex_uv + uoffset, state.vertex_uv + uoffset, vdiff * sizeof(geom_uv_format));
+		gpu_mem_copy(cmd, state.host_vertex_nor_tan + noffset, state.vertex_nor_tan + noffset, vdiff * sizeof(geom_nor_tan_format));
 		state.resident_vertex_count = state.host_vertex_count;
 	}
 
 	auto idiff = state.host_index_count - state.resident_index_count;
 	if(idiff)
 	{
-		gpu_mem_copy(cmd, state.host_indices + state.resident_index_count, state.indices + state.resident_index_count, idiff * sizeof(geom_index_format));
+		auto ioffset = state.resident_index_count * sizeof(geom_index_format);
+		gpu_mem_copy(cmd, state.host_indices + ioffset, state.indices + ioffset, idiff * sizeof(geom_index_format));
 		state.resident_index_count = state.host_index_count;
 	}
 
 	auto cdiff = state.host_cluster_count - state.resident_cluster_count;
 	if(cdiff)
 	{
-		gpu_mem_copy(cmd, state.host_clusters + state.resident_cluster_count, state.clusters + state.resident_cluster_count, cdiff * sizeof(geom_cluster_format));
+		auto coffset = state.resident_cluster_count * sizeof(geom_cluster_format);
+		gpu_mem_copy(cmd, state.host_clusters + coffset, state.clusters + coffset, cdiff * sizeof(geom_cluster_format));
 		state.resident_cluster_count = state.host_cluster_count;
 	}
 
 	auto ldiff = state.host_lod_count - state.resident_lod_count;
 	if(ldiff)
 	{
-		gpu_mem_copy(cmd, state.host_lods + state.resident_lod_count, state.lods + state.resident_lod_count, ldiff * sizeof(geom_lod_format));
+		auto loffset = state.resident_lod_count * sizeof(geom_lod_format);
+		gpu_mem_copy(cmd, state.host_lods + loffset, state.lods + loffset, ldiff * sizeof(geom_lod_format));
 		state.resident_lod_count = state.host_lod_count;
 	}
 }

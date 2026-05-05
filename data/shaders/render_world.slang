@@ -8,6 +8,10 @@ struct ObjectData
 	uint material_offset;
 	uint lod_offset;
 	uint pack_bucket_lcount;
+	uint geom_vtx_offset;
+	uint geom_idx_offset;
+	uint geom_cluster_offset;
+	uint flags;
 };
 
 struct GeometryLOD

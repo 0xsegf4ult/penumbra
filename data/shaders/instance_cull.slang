@@ -66,7 +66,7 @@ void computeMain(uint DTid: SV_DispatchThreadID, uniform CSInput input)
 		for(uint i = 0; i < lod.cluster_count; i++)
 		{
 			input.clusters[global_offset + instance.output_offset + i].object = instance.input_offset;
-			input.clusters[global_offset + instance.output_offset + i].cluster = lod.cluster_offset + i;
+			input.clusters[global_offset + instance.output_offset + i].cluster = object->geom_cluster_offset + lod.cluster_offset + i;
 		}
 	}
 }

@@ -27,9 +27,14 @@ struct basic_transform
 		return *this;
 	}
 
+	constexpr static basic_transform<T> inverse(const basic_transform<T>& t) 
+	{
+		return {-t.translation, ~t.rotation, T(1.0) / t.scale};
+	}	
+
 	Matrix<T, 4, 4> as_matrix() const noexcept
 	{
-		return Matrix<T, 4, 4>::make_scale(scale) * basic_quat<T>::make_mat4(rotation) * Matrix<T, 4, 4>::make_translation(translation);	
+		return Matrix<T, 4, 4>::make_scale(scale) * basic_quat<T>::make_mat4(rotation) * Matrix<T, 4, 4>::make_translation(translation);
 	}
 
 	Matrix<T, 4, 4> as_inverse_translation_rotation() const noexcept

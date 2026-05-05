@@ -7,7 +7,7 @@ import penumbra.math;
 import penumbra.gpu;
 
 import std;
-using std::uint64_t, std::size_t;
+using std::uint64_t, std::size_t, std::uint32_t, std::uint16_t;
 
 namespace penumbra
 {
@@ -28,13 +28,16 @@ export enum RenderBucket
 
 export struct RenderObjectDescription
 {
-	Transform transform;
+	mat4 transform;
 	RenderBucket bucket;
 	vec4 sphere;
 	uint32_t material_offset;
 	uint32_t geom_l0_cluster_count;	
 	uint32_t geom_lod_offset;
 	uint32_t geom_lod_count;
+	uint32_t geom_vtx_offset;
+	uint32_t geom_idx_offset;
+	uint32_t geom_cluster_offset;
 };
 
 export struct RenderBucketData
@@ -84,6 +87,7 @@ export void renderer_write_material(const RenderMaterialData& data);
 export void renderer_write_material(uint32_t offset, const RenderMaterialData& data);
 export GPUDevicePointer renderer_materials_device_pointer();
 export RenderObject renderer_world_insert_object(const RenderObjectDescription& data, uint32_t shadow_level = 4);
+export void renderer_world_update_object(RenderObject handle, const mat4& transform);
 export RenderBucketData renderer_world_get_bucket(RenderView view, RenderBucket bucket);
 export void renderer_set_output_rendertarget(GPUTexture rt);
 export uvec2 renderer_get_render_resolution();

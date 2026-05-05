@@ -15,7 +15,7 @@ import penumbra.renderer;
 
 import std;
 
-using std::uint8_t, std::uint32_t;
+using std::uint8_t, std::uint16_t, std::uint32_t, std::size_t;
 
 namespace penumbra
 {
@@ -42,6 +42,33 @@ void resource_manager_shutdown()
 		gpu_destroy_texture(tex.texture);
 	
 	delete context;
+}
+
+ResourceID resource_manager_import_geometry(const GeometryResource& res)
+{
+	context->geometry.emplace_back(std::move(res));
+	auto rid = ResourceID{ResourceType::Geometry, static_cast<uint32_t>(context->geometry.size())};
+	return rid;
+}
+
+ResourceID resource_manager_import_texture(std::string_view name, const GPUTextureDesc& info, std::span<const std::byte> data)
+{
+	GPUTexture tex = gpu_create_texture(info);
+
+	renderer_write_texture(tex, data, info.mip_count, info.layer_count);
+
+	GPUTextureDescriptor descriptor = gpu_texture_view_descriptor(tex, {.type = info.type, .format = info.format}); 
+
+	context->texture.push_back
+	({
+		std::string{name},
+		tex,
+		descriptor,
+		renderer_resource_transfer_syncval() + 1
+	});
+
+	auto rid = ResourceID{ResourceType::Texture, static_cast<uint32_t>(context->texture.size())};
+	return rid;
 }
 
 ResourceID resource_manager_load_geometry(const vfs::path& path)
@@ -97,22 +124,13 @@ ResourceID resource_manager_load_geometry(const vfs::path& path)
 	);
 	auto ioff = renderer_geometry_push_indices(reinterpret_cast<const geom_index_format*>(data + header->index_offset), icount);
 
-	for(auto& cluster : clusters)
-	{
-		cluster.vertex_offset += voff;
-		cluster.index_offset += ioff;
-	}
-
 	auto coff = renderer_geometry_push_clusters(clusters.data(), ccount);
-	
-	for(auto& lod : lods)
-		lod.cluster_offset += coff;
-	
 	auto loff = renderer_geometry_push_lods(lods.data(), header->num_lods);
 
 	context->geometry.push_back
 	({
-		voff,
+		path.filename().string(),
+ 		voff,
 		vcount,
 		ioff,
 		icount,
@@ -122,7 +140,7 @@ ResourceID resource_manager_load_geometry(const vfs::path& path)
 		loff, 
 		header->num_lods,
 		header->sphere,
-		renderer_resource_transfer_syncval() + 1
+		renderer_resource_transfer_syncval() + 1,
 	});	
 	
 	auto rid = ResourceID{ResourceType::Geometry, static_cast<uint32_t>(context->geometry.size())};
@@ -179,7 +197,7 @@ ResourceID resource_manager_load_texture(const vfs::path& path)
 
 	context->texture.push_back
 	({
-		path.string(),
+		path.filename().string(),
 		tex,
 		descriptor,
 		renderer_resource_transfer_syncval() + 1
@@ -225,6 +243,21 @@ MaterialResource& resource_manager_get_material(const ResourceID& rid)
 	assert(rid.get_type() == ResourceType::Material);
 	assert(rid.get_handle());
 	return context->material[rid.get_handle() - 1];
+}
+
+std::span<GeometryResource> resource_manager_get_geometry_storage()
+{
+	return context->geometry;
+}
+
+std::span<TextureResource> resource_manager_get_texture_storage()
+{
+	return context->texture;
+}
+
+std::span<MaterialResource> resource_manager_get_material_storage()
+{
+	return context->material;
 }
 
 void resource_manager_sync_material(const ResourceID& rid)

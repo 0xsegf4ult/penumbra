@@ -70,6 +70,10 @@ struct RenderObjectData
 	uint32_t material_offset;
 	uint32_t geom_lod_offset;
 	uint32_t pack_bucket_lod_count;
+	uint32_t geom_vtx_offset;
+	uint32_t geom_idx_offset;
+	uint32_t geom_cluster_offset;
+	uint32_t flags;
 };
 
 export class RenderWorld
@@ -121,7 +125,7 @@ public:
 		view.instances = gpu_allocate_memory(sizeof(uvec2) * object_capacity, GPU_MEMORY_MAPPED); 
 		view.clusters = gpu_allocate_memory(sizeof(uvec2) * 65536);
 		view.visibility = gpu_allocate_memory(sizeof(uint32_t) * 65536);
-		view.commands = gpu_allocate_memory(sizeof(GPUIndirectCommand) * 65536, GPU_MEMORY_PRIVATE, GPU_BUFFER_INDIRECT);
+		view.commands = gpu_allocate_memory(sizeof(GPUIndexedIndirectCommand) * 65536, GPU_MEMORY_PRIVATE, GPU_BUFFER_INDIRECT);
 		for(int i = 0; i < config::renderer_frames_in_flight; i++)
 		{
 			view.cbuffer[i] = gpu_allocate_memory(sizeof(RenderViewCBuffer), GPU_MEMORY_MAPPED, GPU_BUFFER_UNIFORM);
@@ -191,13 +195,19 @@ public:
 
 		RenderObjectData* obj = reinterpret_cast<RenderObjectData*>(gpu_map_memory(host_objects)) + object_count;
 
-		obj->transform = data.transform.as_matrix();
+		obj->transform = data.transform;
 		obj->sphere = data.sphere;
-		obj->cull_scale = std::max(std::max(std::abs(data.transform.scale.x), std::abs(data.transform.scale.y)), std::abs(data.transform.scale.z)); 
+		
+        	const vec3 scale = {data.transform.row(0u).magnitude(), data.transform.row(1u).magnitude(), data.transform.row(2u).magnitude()};
+		obj->cull_scale = std::max(std::max(std::abs(scale.x), std::abs(scale.y)), std::abs(scale.z)); 
+	
 		obj->material_offset = data.material_offset;
 		obj->geom_lod_offset = data.geom_lod_offset;
 		obj->pack_bucket_lod_count = (data.bucket << 16) | data.geom_lod_count;
-		
+		obj->geom_vtx_offset = data.geom_vtx_offset;
+		obj->geom_idx_offset = data.geom_idx_offset;
+		obj->geom_cluster_offset = data.geom_cluster_offset;
+
 		object_count++;
 		RenderObject handle{object_count};
 		dirty_objects.push_back(handle);
@@ -220,6 +230,17 @@ public:
 		return handle;
 	}
 
+	void update_object(RenderObject handle, const mat4& transform)
+	{
+		RenderObjectData* obj = reinterpret_cast<RenderObjectData*>(gpu_map_memory(host_objects)) + (handle - 1);
+		obj->transform = transform;
+
+        	const vec3 scale = {transform.row(0u).magnitude(), transform.row(1u).magnitude(), transform.row(2u).magnitude()};
+		obj->cull_scale = std::max(std::max(std::abs(scale.x), std::abs(scale.y)), std::abs(scale.z)); 
+
+		dirty_objects.push_back(handle);
+	}
+
 	void upload_objects(GPUCommandBuffer& cmd)
 	{
 		if(dirty_objects.empty())
@@ -227,35 +248,15 @@ public:
 
 		if(dirty_objects.size() == object_count)
 		{
-			log::debug("render_world: reuploading object buffer");
 			gpu_mem_copy(cmd, host_objects, objects, object_count * sizeof(RenderObjectData));
 			dirty_objects.clear();
 			return;
 		}
 
-		uint32_t prev_handle = 0;
-		uint32_t first_handle = 0;
-		uint32_t range_size = 0;
-
 		for(auto handle : dirty_objects)
 		{
-			if(prev_handle + 1 == handle)
-			{
-				range_size++;
-				prev_handle = handle;
-				continue;
-			}
-
-			if(first_handle)
-			{
-				auto offset = (first_handle - 1) * sizeof(RenderObjectData);
-				auto size = range_size * sizeof(RenderObjectData);
-				gpu_mem_copy(cmd, host_objects + offset, objects + offset, size);
-			}
-
-			first_handle = handle;
-			prev_handle = handle;
-			range_size = 0;
+			auto offset = (handle - 1) * sizeof(RenderObjectData);
+			gpu_mem_copy(cmd, host_objects + offset, objects + offset, sizeof(RenderObjectData));
 		}
 		dirty_objects.clear();
 
@@ -407,7 +408,7 @@ public:
 		
 		return
 		{
-			view.commands + (view.cluster_bucket_offsets[bucket] * sizeof(GPUIndirectCommand)),
+			view.commands + (view.cluster_bucket_offsets[bucket] * sizeof(GPUIndexedIndirectCommand)),
 			view.buckets[renderer_gfx_frame_index()] + (bucket * sizeof(uvec2) + sizeof(uint32_t)),
 				
 			view.clusters,

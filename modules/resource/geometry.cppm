@@ -56,6 +56,7 @@ export struct GeometryFileFormat
 
 export struct GeometryResource
 {
+	std::string name;
 	uint32_t vertex_offset;
 	uint32_t vertex_count;
 	uint32_t index_offset;

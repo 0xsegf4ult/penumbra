@@ -335,6 +335,12 @@ constexpr auto operator/(const Vector<T, N, std::index_sequence<Is...>>& v, U s)
 }
 
 template <typename T, typename U, size_t N, size_t... Is>
+constexpr auto operator/(U s, const Vector<T, N, std::index_sequence<Is...>>& v)
+{
+	return Vector<T, N>{T(s) / v.data[Is]...};
+}
+
+template <typename T, typename U, size_t N, size_t... Is>
 constexpr bool operator==(const Vector<T, N, std::index_sequence<Is...>>& lhs, const Vector<U, N, std::index_sequence<Is...>>& rhs) noexcept
 {
         return ((lhs.data[Is] == rhs.data[Is]) && ...);

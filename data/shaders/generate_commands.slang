@@ -25,7 +25,8 @@ void computeMain(uint DTid: SV_DispatchThreadID, uniform CSInput input)
 		return;
 
 	ClusterInstance instance = input.instances[DTid];
-	uint bucket = input.objects[instance.object - 1].pack_bucket_lcount >> 16;
+	Ptr<ObjectData, Access.Read> object = input.objects + (instance.object - 1);
+	uint bucket = object->pack_bucket_lcount >> 16;
 	uint bOffset = 0;
 	if(bucket > 0)
 	{
@@ -41,8 +42,8 @@ void computeMain(uint DTid: SV_DispatchThreadID, uniform CSInput input)
 	IndirectCommand cmd;
 	cmd.index_count = cluster.index_count;
 	cmd.instance_count = 1u;
-	cmd.index_offset = cluster.index_offset;
-	cmd.vertex_offset = cluster.vertex_offset;
+	cmd.index_offset = object->geom_idx_offset + cluster.index_offset;
+	cmd.vertex_offset = object->geom_vtx_offset + cluster.vertex_offset;
 	if(input.is_visbuffer == 1)
 	{
 		cmd.instance_id = DTid;
