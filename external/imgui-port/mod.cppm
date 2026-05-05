@@ -124,6 +124,7 @@ export namespace ImGuizmo
 	using ImGuizmo::Manipulate;
 	using ImGuizmo::OPERATION;
 	using ImGuizmo::LOCAL;
+	using ImGuizmo::WORLD;
 }
 
 export using ::ImGuiKey;

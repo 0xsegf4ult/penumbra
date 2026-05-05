@@ -14,6 +14,13 @@ using std::uint32_t;
 namespace penumbra
 {
 
+export enum class ViewportTool
+{
+	Translate,
+	Rotate,
+	Scale
+};
+
 export class Viewport : public Widget
 {
 public:
@@ -46,6 +53,16 @@ public:
 		ImGui::SetNextWindowSize(ImVec2(800, 600), ImGuiCond_FirstUseEver);
 		ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
 		ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
+	}
+
+	void set_tool(ViewportTool tool)
+	{
+		this->tool = tool;
+	}
+
+	ViewportTool get_tool() const
+	{
+		return tool;
 	}
 
 	void on_draw() override
@@ -119,7 +136,7 @@ private:
 			return;
 
 		auto& transform = world->entities.get<Transform>(world->selected_entity);
-		mat4 obj_mtx = transform.as_matrix();
+		mat4 obj_mtx = get_entity_world_matrix(world->entities, world->selected_entity);
 
 		ImGuizmo::SetOrthographic(false);
 		ImGuizmo::SetDrawlist();
@@ -128,10 +145,26 @@ private:
 		// ImGuizmo uses OpenGL NDC
 		proj[1][1] *= -1.0f;
 
-		int op = ImGuizmo::OPERATION::TRANSLATE;
+		int op;
+		switch(tool)
+		{
+		case ViewportTool::Translate:
+			op = ImGuizmo::OPERATION::TRANSLATE;
+			break;
+		case ViewportTool::Rotate:
+			op = ImGuizmo::OPERATION::ROTATE;
+			break;
+		case ViewportTool::Scale:	
+			op = ImGuizmo::OPERATION::SCALE;
+			break;
+		default:
+			return;
+		}
 
-		bool snap = false;
+		bool snap = ImGui::IsKeyDown(ImGuiMod_Ctrl);
 		float snapping = 0.5f;
+		if(tool == ViewportTool::Rotate)
+			snapping = 45.0f;
 
 		vec3 snap_values{snapping};
 
@@ -139,8 +172,15 @@ private:
 		ImGuizmo::Manipulate(&view[0][0], &proj[0][0], static_cast<ImGuizmo::OPERATION>(op), ImGuizmo::LOCAL, &obj_mtx[0][0], &delta[0][0], snap ? &snap_values.x : nullptr);
 		if(ImGuizmo::IsUsing())
 		{
-			auto [nt, nr, ns] = decompose(obj_mtx);
-			transform.translation = nt;
+			auto [nt, nr, ns] = decompose(delta);
+			if(tool == ViewportTool::Translate)
+				transform.translation += nt;
+			else if(tool == ViewportTool::Rotate)
+				transform.rotation = transform.rotation * nr;
+			else if(tool == ViewportTool::Scale)
+				transform.scale = ns;
+
+			world->entities.emplace<transform_dirty_t>(world->selected_entity);
 		}
 	}
 
@@ -173,6 +213,8 @@ private:
 	GPUPipeline vb_picking_cs;
 	GPUPointer picking_buffer;
 	uvec2 picking_pos{0u, 0u};
+
+	ViewportTool tool{ViewportTool::Translate};
 };
 
 }
