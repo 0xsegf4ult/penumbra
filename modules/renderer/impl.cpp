@@ -125,6 +125,16 @@ struct renderer_context_t
 	GPUTextureDescriptor depthbuffer;
 	GPUTextureDescriptor hdrbuffer;
 	GPUTextureDescriptor hdrbuffer_rw;
+	
+	GPUTexture bloombuffer_tex;
+	GPUTextureDescriptor bloombuffer;
+	std::vector<GPUTextureDescriptor> bloombuffer_rw;
+	uint32_t bloom_mips;
+
+	GPUTexture tmp_quarter_rt_tex;
+	GPUTextureDescriptor tmp_quarter_rt;
+	std::vector<GPUTextureDescriptor> tmp_quarter_rt_rw;
+
 	GPUTexture output_rt{0u}; 
 	int tonemapper{1};
 
@@ -132,6 +142,8 @@ struct renderer_context_t
 	GPUPipeline visbuffer_build_alphamask_pso;
 	GPUPipeline vb_resolve_cs;
 	GPUPipeline vb_visualize_cs;
+	GPUPipeline bloom_hdrfilter_cs;
+	GPUPipeline bloom_filter_cs;
 	GPUPipeline hdr_compose_pso;
 	GPUPipeline brdflut_pso;
 
@@ -187,10 +199,37 @@ void renderer_create_rendertargets()
 	renderer->hdrbuffer = gpu_texture_view_descriptor(renderer->hdrbuffer_tex, {.format = GPU_FORMAT_B10GR11_UFLOAT});
 	renderer->hdrbuffer_rw = gpu_rwtexture_view_descriptor(renderer->hdrbuffer_tex, {.format = GPU_FORMAT_B10GR11_UFLOAT});
 
+	renderer->bloom_mips = std::min(5u, uint32_t(std::log2(std::max(renderer->render_resolution.x / 4, renderer->render_resolution.y / 4))));
+	renderer->bloombuffer_tex = gpu_create_texture
+	({
+		.dim = uvec3{renderer->render_resolution / 4, 1u},
+		.mip_count = renderer->bloom_mips,
+		.format = GPU_FORMAT_B10GR11_UFLOAT,
+		.usage = GPU_TEXTURE_SAMPLED | GPU_TEXTURE_STORAGE
+	});
+	renderer->bloombuffer = gpu_texture_view_descriptor(renderer->bloombuffer_tex, {.format = GPU_FORMAT_B10GR11_UFLOAT});
+	renderer->bloombuffer_rw.resize(renderer->bloom_mips);
+	for(uint32_t i = 0u; i < renderer->bloom_mips; i++)
+		renderer->bloombuffer_rw[i] = gpu_rwtexture_view_descriptor(renderer->bloombuffer_tex, {.format = GPU_FORMAT_B10GR11_UFLOAT, .base_mip = uint8_t(i), .mip_count = 1u});
+
+	renderer->tmp_quarter_rt_tex = gpu_create_texture
+	({
+		.dim = uvec3{renderer->render_resolution / 4, 1u},
+		.mip_count = renderer->bloom_mips,
+		.format = GPU_FORMAT_B10GR11_UFLOAT,
+		.usage = GPU_TEXTURE_SAMPLED | GPU_TEXTURE_STORAGE
+	});
+	renderer->tmp_quarter_rt = gpu_texture_view_descriptor(renderer->tmp_quarter_rt_tex, {.format = GPU_FORMAT_B10GR11_UFLOAT});
+	renderer->tmp_quarter_rt_rw.resize(renderer->bloom_mips);
+	for(uint32_t i = 0u; i < renderer->bloom_mips; i++)
+		renderer->tmp_quarter_rt_rw[i] = gpu_rwtexture_view_descriptor(renderer->tmp_quarter_rt_tex, {.format = GPU_FORMAT_B10GR11_UFLOAT, .base_mip = uint8_t(i), .mip_count = 1u});
+
 	auto cmd = gpu_record_commands(GPU_QUEUE_GRAPHICS);
 	gpu_texture_layout_transition(cmd, renderer->visbuffer_tex, GPU_STAGE_NONE, GPU_STAGE_RASTER_COLOR_OUTPUT, GPU_TEXTURE_LAYOUT_UNDEFINED, GPU_TEXTURE_LAYOUT_GENERAL);
 	gpu_texture_layout_transition(cmd, renderer->depthbuffer_tex, GPU_STAGE_NONE, GPU_STAGE_RASTER_COLOR_OUTPUT, GPU_TEXTURE_LAYOUT_UNDEFINED, GPU_TEXTURE_LAYOUT_GENERAL);
 	gpu_texture_layout_transition(cmd, renderer->hdrbuffer_tex, GPU_STAGE_NONE, GPU_STAGE_COMPUTE, GPU_TEXTURE_LAYOUT_UNDEFINED, GPU_TEXTURE_LAYOUT_GENERAL);
+	gpu_texture_layout_transition(cmd, renderer->bloombuffer_tex, GPU_STAGE_NONE, GPU_STAGE_COMPUTE, GPU_TEXTURE_LAYOUT_UNDEFINED, GPU_TEXTURE_LAYOUT_GENERAL);
+	gpu_texture_layout_transition(cmd, renderer->tmp_quarter_rt_tex, GPU_STAGE_NONE, GPU_STAGE_COMPUTE, GPU_TEXTURE_LAYOUT_UNDEFINED, GPU_TEXTURE_LAYOUT_GENERAL);
 	gpu_submit(GPU_QUEUE_GRAPHICS, cmd);
 }
 
@@ -345,6 +384,8 @@ void renderer_init(Window& wnd)
 
 	renderer->vb_resolve_cs = gpu_create_compute_pipeline(load_shader("shaders/visbuffer_resolve"));
 	renderer->vb_visualize_cs = gpu_create_compute_pipeline(load_shader("shaders/visbuffer_visualize"));
+	renderer->bloom_hdrfilter_cs = gpu_create_compute_pipeline(load_shader("shaders/bloom_filterHDR"));
+	renderer->bloom_filter_cs = gpu_create_compute_pipeline(load_shader("shaders/bloom_filter"));
 
 	renderer->hdr_compose_pso = gpu_create_graphics_pipeline(load_shader("shaders/hdr_compose"),
 	{
@@ -380,12 +421,16 @@ void renderer_shutdown()
 	gpu_destroy_texture(renderer->brdflut_tex);
 
 	gpu_destroy_pipeline(renderer->brdflut_pso);
+	gpu_destroy_pipeline(renderer->bloom_filter_cs);
+	gpu_destroy_pipeline(renderer->bloom_hdrfilter_cs);
 	gpu_destroy_pipeline(renderer->hdr_compose_pso);
 	gpu_destroy_pipeline(renderer->vb_visualize_cs);
 	gpu_destroy_pipeline(renderer->vb_resolve_cs);
 	gpu_destroy_pipeline(renderer->visbuffer_build_alphamask_pso);
 	gpu_destroy_pipeline(renderer->visbuffer_build_pso);
 
+	gpu_destroy_texture(renderer->tmp_quarter_rt_tex);
+	gpu_destroy_texture(renderer->bloombuffer_tex);
 	gpu_destroy_texture(renderer->hdrbuffer_tex);
 	gpu_destroy_texture(renderer->depthbuffer_tex);
 	gpu_destroy_texture(renderer->visbuffer_tex);
@@ -425,10 +470,20 @@ void renderer_next_frame()
 		gpu_wait_queue(GPU_QUEUE_GRAPHICS, renderer->gfx_queue_frames[renderer->frame_index]);
 
 		//FIXME: defer old framebuffer destruction, no need to wait for queue idle
+		gpu_destroy_texture(renderer->tmp_quarter_rt_tex);
+		gpu_destroy_texture(renderer->bloombuffer_tex);
 		gpu_destroy_texture(renderer->hdrbuffer_tex);
 		gpu_destroy_texture(renderer->depthbuffer_tex);
 		gpu_destroy_texture(renderer->visbuffer_tex);
 
+		for(auto& desc : renderer->tmp_quarter_rt_rw)
+			gpu_free_descriptor(desc);
+
+		for(auto& desc : renderer->bloombuffer_rw)
+			gpu_free_descriptor(desc);
+
+		gpu_free_descriptor(renderer->tmp_quarter_rt);
+		gpu_free_descriptor(renderer->bloombuffer);
 		gpu_free_descriptor(renderer->hdrbuffer_rw);
 		gpu_free_descriptor(renderer->hdrbuffer);
 		gpu_free_descriptor(renderer->depthbuffer);
@@ -577,8 +632,6 @@ void renderer_visualize_visbuffer(GPUCommandBuffer& cmd)
 	shader_data.visbuffer = renderer->visbuffer.handle;
 	shader_data.output = renderer->hdrbuffer_rw.handle;
 	gpu_dispatch(cmd, &shader_data, {(renderer->render_resolution.x + 7u) / 8u, (renderer->render_resolution.y + 7u) / 8u, 1u});
-
-	gpu_barrier(cmd, GPU_STAGE_COMPUTE, GPU_STAGE_FRAGMENT_SHADER);
 }
 
 void renderer_resolve_visbuffer(GPUCommandBuffer& cmd)
@@ -604,8 +657,6 @@ void renderer_resolve_visbuffer(GPUCommandBuffer& cmd)
 	vbr_data.visbuffer = renderer->visbuffer.handle;
 	vbr_data.output = renderer->hdrbuffer_rw.handle;
 	gpu_dispatch(cmd, &vbr_data, {(renderer->render_resolution.x + 7u) / 8u, (renderer->render_resolution.y + 7u) / 8u, 1u});
-
-	gpu_barrier(cmd, GPU_STAGE_COMPUTE, GPU_STAGE_FRAGMENT_SHADER);
 }
 
 void renderer_update_cascades(VisbufferCBuffer* vbconst, const RenderCameraData& vb_cam)
@@ -846,13 +897,83 @@ void renderer_process_frame(double dt)
 		renderer_resolve_visbuffer(cmd);
 	else
 		renderer_visualize_visbuffer(cmd);
+	
+	gpu_barrier(cmd, GPU_STAGE_COMPUTE, GPU_STAGE_RASTER_COLOR_OUTPUT);
+
+	gpu_barrier(cmd, GPU_STAGE_RASTER_COLOR_OUTPUT, GPU_STAGE_COMPUTE);
+
+	gpu_set_pipeline(cmd, renderer->bloom_hdrfilter_cs);
+
+	struct BloomHDRData
+	{
+		uint32_t input;
+		uint32_t output;
+		vec2 inv_res;
+		float threshold;
+		float max_value;
+	} bhdr_data;
+	bhdr_data.input = renderer->hdrbuffer.handle;
+	bhdr_data.output = renderer->bloombuffer_rw[0].handle;
+	bhdr_data.inv_res = {1.0f / float(renderer->render_resolution.x / 4), 1.0f / float(renderer->render_resolution.y / 4)};
+	bhdr_data.threshold = 1.0f;
+	bhdr_data.max_value = 10.0f;
+
+	gpu_dispatch(cmd, &bhdr_data, {(renderer->render_resolution.x / 4 + 7u) / 8u, (renderer->render_resolution.y / 4 + 7u) / 8u, 1u});
+	
+	gpu_barrier(cmd, GPU_STAGE_COMPUTE, GPU_STAGE_COMPUTE);
+
+	struct BloomFilterData
+	{
+		uint32_t input;
+		uint32_t output;
+		uvec2 res;
+		vec2 inv_res;
+		vec2 direction;
+		int level;
+	} bf_data;
+	bf_data.inv_res = bhdr_data.inv_res;
+	bf_data.level = 0; 
+
+	uint32_t bdim_x = renderer->render_resolution.x / 4;
+	uint32_t bdim_y = renderer->render_resolution.y / 4;
+
+	gpu_set_pipeline(cmd, renderer->bloom_filter_cs);
+
+	for(uint32_t i = 0; i < renderer->bloom_mips - 1; i++)
+	{
+		bdim_x /= 2;
+		bdim_y /= 2;
+		bf_data.input = renderer->bloombuffer.handle;
+		bf_data.output = renderer->tmp_quarter_rt_rw[i + 1].handle;
+		bf_data.res = {bdim_x, bdim_y};
+		bf_data.inv_res *= 2.0f;
+		bf_data.direction = {1.0f, 0.0f};
+
+		gpu_dispatch(cmd, &bf_data, {(bdim_x + 255u) / 256u, bdim_y, 1u}); 
+
+		gpu_barrier(cmd, GPU_STAGE_COMPUTE, GPU_STAGE_COMPUTE);
+
+		bf_data.direction = {0.0f, 1.0f};
+		bf_data.level = i + 1;
+		bf_data.input = renderer->tmp_quarter_rt.handle;
+		bf_data.output = renderer->bloombuffer_rw[i + 1].handle;
+
+		gpu_dispatch(cmd, &bf_data, {bdim_x, (bdim_y + 255u) / 256, 1u});		
+
+		if(i < renderer->bloom_mips - 2)
+			gpu_barrier(cmd, GPU_STAGE_COMPUTE, GPU_STAGE_COMPUTE);
+	}
+
+	gpu_barrier(cmd, GPU_STAGE_COMPUTE, GPU_STAGE_FRAGMENT_SHADER);
 
 	struct HDRComposeData
 	{
 		uint32_t hdrbuffer_handle;
+		uint32_t bloombuffer_handle;
 		int tonemapper;
 	} compose_data;
 	compose_data.hdrbuffer_handle = renderer->hdrbuffer.handle;
+	compose_data.bloombuffer_handle = renderer->bloombuffer.handle;
 	compose_data.tonemapper = renderer->tonemapper;
 
 	if(renderer->output_rt)

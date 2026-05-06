@@ -8,7 +8,8 @@ struct VSOutput
 
 struct FSInput
 {
-	ResourceHandle<Texture2D> hdrbuffer;
+	ResourceHandle<Texture2D<float3>> hdrbuffer;
+	ResourceHandle<Texture2D<float3>> bloombuffer;
 	int tonemapper;
 };
 
@@ -80,8 +81,14 @@ float3 applyAGX(float3 color)
 [shader("fragment")]
 float4 fragmentMain(VSOutput input, uniform FSInput data) : SV_Target0
 {	
-	ResourceHandle<SamplerState> smp = {0u};
-	float3 hdr_color = data.hdrbuffer.desc.SampleLevel(smp.desc, input.uv, 0).xyz;
+	ResourceHandle<SamplerState> smp = {SAMPLER_LINEAR_CLAMP};
+	float3 hdr_color = data.hdrbuffer.desc.SampleLevel(smp.desc, input.uv, 0);
+	float3 bloom = data.bloombuffer.desc.SampleLevel(smp.desc, input.uv, 1.5);
+	bloom += data.bloombuffer.desc.SampleLevel(smp.desc, input.uv, 2.5);
+	bloom += data.bloombuffer.desc.SampleLevel(smp.desc, input.uv, 4.5);
+	bloom /= 3; 
+
+	hdr_color += bloom;
 
 	switch(data.tonemapper)
 	{
