@@ -142,6 +142,7 @@ struct renderer_context_t
 	GPUPipeline visbuffer_build_alphamask_pso;
 	GPUPipeline vb_resolve_cs;
 	GPUPipeline vb_visualize_cs;
+	GPUPipeline transparent_pbr_pso;
 	GPUPipeline bloom_hdrfilter_cs;
 	GPUPipeline bloom_filter_cs;
 	GPUPipeline hdr_compose_pso;
@@ -384,6 +385,21 @@ void renderer_init(Window& wnd)
 
 	renderer->vb_resolve_cs = gpu_create_compute_pipeline(load_shader("shaders/visbuffer_resolve"));
 	renderer->vb_visualize_cs = gpu_create_compute_pipeline(load_shader("shaders/visbuffer_visualize"));
+	GPUBlendDesc alpha_blend_state
+	{
+		.src_color_factor = GPU_BLEND_FACTOR_ONE,
+		.dst_color_factor = GPU_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA,
+		.src_alpha_factor = GPU_BLEND_FACTOR_ONE,
+		.dst_alpha_factor = GPU_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA
+	};
+
+	renderer->transparent_pbr_pso = gpu_create_graphics_pipeline(load_shader("shaders/transparent_PBR"),
+	{
+		.color_targets = {GPU_FORMAT_B10GR11_UFLOAT},
+		.depth_format = GPU_FORMAT_D32_SFLOAT,
+		.blendstate = &alpha_blend_state
+	});
+
 	renderer->bloom_hdrfilter_cs = gpu_create_compute_pipeline(load_shader("shaders/bloom_filterHDR"));
 	renderer->bloom_filter_cs = gpu_create_compute_pipeline(load_shader("shaders/bloom_filter"));
 
@@ -424,6 +440,7 @@ void renderer_shutdown()
 	gpu_destroy_pipeline(renderer->bloom_filter_cs);
 	gpu_destroy_pipeline(renderer->bloom_hdrfilter_cs);
 	gpu_destroy_pipeline(renderer->hdr_compose_pso);
+	gpu_destroy_pipeline(renderer->transparent_pbr_pso);
 	gpu_destroy_pipeline(renderer->vb_visualize_cs);
 	gpu_destroy_pipeline(renderer->vb_resolve_cs);
 	gpu_destroy_pipeline(renderer->visbuffer_build_alphamask_pso);
@@ -859,6 +876,59 @@ void renderer_update_shadowmaps(GPUCommandBuffer& cmd)
 	}
 }
 
+void renderer_forward_passes(GPUCommandBuffer& cmd)
+{
+	gpu_begin_renderpass(cmd,
+	{
+		.color_targets =
+		{
+			{
+			.texture = renderer->hdrbuffer_tex,
+			.load_op = GPU_LOAD_OP_LOAD
+			}
+		},
+		.depth_target = 
+		{
+			.texture  = renderer->depthbuffer_tex,
+			.load_op = GPU_LOAD_OP_LOAD
+		}
+	});
+	
+	gpu_set_pipeline(cmd, renderer->transparent_pbr_pso);
+	gpu_set_cullmode(cmd, GPU_CULLMODE_CW);
+
+	GPUDepthStencilDesc reverse_z_transparent
+	{
+		.depth_mode = GPU_DEPTH_READ,
+		.depth_test = GPU_COMPARE_OP_GREATER
+	};
+	gpu_set_depth_stencil_state(cmd, reverse_z_transparent);
+
+	gpu_write_cbuffer_descriptor(cmd, renderer->visbuffer_cbv[renderer->frame_index]);
+
+	auto draw_data = renderer_world_get_bucket(renderer->camera_view, RENDER_BUCKET_TRANSPARENT);
+	
+	struct TransparentPSOData
+	{
+		GPUDevicePointer objects;
+		GPUDevicePointer instances;
+		GPUDevicePointer materials;
+	} shader_data;
+	shader_data.objects = renderer->render_world.get_objects();
+	shader_data.instances = gpu_host_to_device_pointer(draw_data.instances);
+	shader_data.materials = gpu_host_to_device_pointer(renderer->materials.data); 
+
+	gpu_bind_index_buffer(cmd, renderer_geometry_index_pointer(), GPU_INDEX_TYPE_U8);
+	
+	gpu_draw_indexed_indirect_count(cmd, &shader_data, draw_data.commands, draw_data.counter, draw_data.max_instance_count);
+
+	gpu_set_cullmode(cmd, GPU_CULLMODE_NONE);
+	auto ds_draw_data = renderer_world_get_bucket(renderer->camera_view, RENDER_BUCKET_TRANSPARENT_DOUBLE_SIDED);
+	gpu_draw_indexed_indirect_count(cmd, &shader_data, ds_draw_data.commands, ds_draw_data.counter, ds_draw_data.max_instance_count);
+
+	gpu_end_renderpass(cmd);
+}
+
 void renderer_process_frame(double dt)
 {
 	ZoneScoped;
@@ -899,6 +969,8 @@ void renderer_process_frame(double dt)
 		renderer_visualize_visbuffer(cmd);
 	
 	gpu_barrier(cmd, GPU_STAGE_COMPUTE, GPU_STAGE_RASTER_COLOR_OUTPUT);
+
+	renderer_forward_passes(cmd);
 
 	gpu_barrier(cmd, GPU_STAGE_RASTER_COLOR_OUTPUT, GPU_STAGE_COMPUTE);
 
