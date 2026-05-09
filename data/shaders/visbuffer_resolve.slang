@@ -128,6 +128,15 @@ float3 calculate_direct_lighting(Surface surface, float depth, float2 svpos)
 	float3 diffuse = surface.diffuse * l_scatter * v_scatter * (1.0 / float.getPi());	
 
 	float3 brdf = diffuse + specular_contrib;
+	if(surface.has_clearcoat)
+	{
+		float c_NdotL = saturate(dot(surface.g_normal, L));
+		float c_NdotV = saturate(dot(surface.g_normal, surface.V));
+		float c_NdotH = saturate(dot(surface.g_normal, H));
+		float c_NDF = DistributionGGX(c_NdotH, surface.clearcoat_roughness);
+		float c_G = GeometrySmith(c_NdotV, c_NdotL, surface.clearcoat_roughness);
+		brdf = lerp(brdf, c_NdotL * float3(c_NDF * c_G), surface.clearcoat_factor * surface.clearcoat_fresnel);	
+	}
 
 	return shadow * brdf * luminance;
 } 
@@ -285,6 +294,17 @@ void computeMain(uint groupIndex : SV_GroupIndex, uint2 Gid : SV_GroupID, unifor
 	float3 reflection = reflect(-surface.V, surface.N);
 	float3 amb_PFC = consts.prefiltered.desc->SampleLevel(smp.desc, reflection, surface.roughness * 8.0) * consts.ambient_factor;
 	
+	float3 clearcoat_ambpfc = float3(0.0);
+	if(mtl.flags & MaterialFlags.Clearcoat)
+	{
+		surface.has_clearcoat = true;
+		surface.clearcoat_factor = mtl.clearcoat_factor;
+		surface.clearcoat_roughness = mtl.clearcoat_roughness_factor;
+		surface.clearcoat_fresnel = fresnelSchlick(saturate(dot(surface.g_normal, surface.V)), float3(surface.reflectance)); 
+		float3 cc_reflection = reflect(-surface.V, surface.g_normal);
+		clearcoat_ambpfc = consts.prefiltered.desc->SampleLevel(smp.desc, cc_reflection, surface.clearcoat_roughness * 8.0) * consts.ambient_factor;
+	}	
+
 	surface.roughness = max(surface.roughness, 0.045);
 
 	float depth_linear = tmp.z; 
@@ -294,6 +314,11 @@ void computeMain(uint groupIndex : SV_GroupIndex, uint2 Gid : SV_GroupID, unifor
 	float horizon = min(1.0 + dot(reflection, surface.N), 1.0);
 	float3 amb_SPEC = amb_PFC * (surface.f0 * envBRDF.x + surface.f90 * envBRDF.y) * horizon * horizon;
 	float3 ambient = surface.diffuse * amb_IRR + amb_SPEC;
+	if(mtl.flags & MaterialFlags.Clearcoat)
+	{
+		ambient = lerp(ambient, clearcoat_ambpfc, surface.clearcoat_factor * surface.clearcoat_fresnel);
+		emissive = emissive * (1.0 - surface.clearcoat_factor * surface.clearcoat_fresnel);
+	}
 
 	input.framebuffer.desc[pixel] = (ambient + l0 + emissive) * consts.exposure;
 

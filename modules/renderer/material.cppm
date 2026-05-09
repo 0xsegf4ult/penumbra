@@ -28,6 +28,12 @@ export struct RenderMaterialFactors
 	vec3 emissive{0.0f};
 };
 
+export struct ClearcoatMaterialInfo
+{
+	float factor{1.0f};
+	float roughness_factor{1.0f};
+};
+
 export struct RenderMaterialData
 {
 	RenderMaterialFactors factors{};
@@ -37,6 +43,8 @@ export struct RenderMaterialData
 	uint32_t mro{0u};
 	uint32_t normalmap{0u};
 	uint32_t emissive{0u};
+
+	ClearcoatMaterialInfo clearcoat{};
 };
 
 export struct RenderMaterialStorage

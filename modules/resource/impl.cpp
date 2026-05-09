@@ -274,6 +274,7 @@ void resource_manager_sync_material(const ResourceID& rid)
 		.mro = res.mro.get_handle() ? resource_manager_get_texture(res.mro).descriptor.handle : 0u,
 		.normalmap = res.normalmap.get_handle() ? resource_manager_get_texture(res.normalmap).descriptor.handle : 0u,
 		.emissive = res.emissive.get_handle() ? resource_manager_get_texture(res.emissive).descriptor.handle : 0u,
+		.clearcoat = res.clearcoat
 	});
 }
 

@@ -21,6 +21,8 @@ export struct MaterialResource
 	ResourceID mro;
 	ResourceID normalmap;
 	ResourceID emissive;
+
+	ClearcoatMaterialInfo clearcoat;
 };
 
 }

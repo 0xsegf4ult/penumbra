@@ -27,6 +27,9 @@ struct MaterialPBR
 	ResourceHandle<Texture2D> mro;
 	ResourceHandle<Texture2D> normalmap;
 	ResourceHandle<Texture2D> emissive;
+
+	float clearcoat_factor;
+	float clearcoat_roughness_factor;
 };
 
 float DistributionGGX(float NdotH, float roughness)

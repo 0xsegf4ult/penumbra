@@ -273,6 +273,11 @@ private:
 				dirty |= ImGui::DragFloat("Alpha threshold", &mtl.factors.alpha_cf, 0.01f, 0.0f, 1.0f);
 			}
 
+			if(mtl.flags & RENDER_MATERIAL_CLEARCOAT)
+			{
+				dirty |= ImGui::DragFloat("Clearcoat factor", &mtl.clearcoat.factor, 0.01f, 0.0f, 1.0f);
+				dirty |= ImGui::DragFloat("Clearcoat roughness factor", &mtl.clearcoat.roughness_factor, 0.01f, 0.0f, 1.0f);
+			}
 
 			if(dirty)
 				resource_manager_sync_material(rid);
