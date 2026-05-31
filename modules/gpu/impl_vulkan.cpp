@@ -480,7 +480,6 @@ constexpr std::array<const char*, 1> default_instance_extensions =
 constexpr std::array<const char*, 3> device_extensions =
 {
 	VK_KHR_SWAPCHAIN_EXTENSION_NAME,
-	VK_KHR_PRESENT_MODE_FIFO_LATEST_READY_EXTENSION_NAME,
 	VK_EXT_EXTENDED_DYNAMIC_STATE_3_EXTENSION_NAME
 };
 
@@ -830,17 +829,10 @@ bool vulkan_create_device(std::span<VkPhysicalDevice> phys_devices, int index = 
 		.extendedDynamicState3DepthClampEnable = true
 	};
 
-	VkPhysicalDevicePresentModeFifoLatestReadyFeaturesKHR chain_pmfifo
-	{
-		.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PRESENT_MODE_FIFO_LATEST_READY_FEATURES_KHR,
-		.pNext = &ds3ext,
-		.presentModeFifoLatestReady = true
-	};
-
 	VkPhysicalDeviceRobustness2FeaturesEXT chain_rob2
 	{
 		.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ROBUSTNESS_2_FEATURES_EXT,
-		.pNext = &chain_pmfifo,
+		.pNext = &ds3ext,
 		.nullDescriptor = true
 	};
 
@@ -931,9 +923,10 @@ bool vulkan_create_device(std::span<VkPhysicalDevice> phys_devices, int index = 
 		.pEnabledFeatures = nullptr
 	};
 
-	if(vkCreateDevice(gpu_context->phys_device, &device_ci, nullptr, &gpu_context->device) != VK_SUCCESS)
+	auto status = vkCreateDevice(gpu_context->phys_device, &device_ci, nullptr, &gpu_context->device);
+	if(status != VK_SUCCESS)
 	{
-		log::error("gpu_vulkan: failed to create device");
+		log::error("gpu_vulkan: failed to create device: {}", string_VkResult(status));
 		return false;
 	}
 
