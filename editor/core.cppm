@@ -16,6 +16,7 @@ import :scenegraph;
 import :widget;
 import :viewport;
 export import :world_state;
+import :import_gltf;
 
 using std::uint32_t, std::size_t;
 
@@ -348,8 +349,29 @@ private:
 				window.set_capture_mouse(true);
 			}
 
+			if(ImGui::BeginMenu("File"))
+			{
+				if(ImGui::BeginMenu("Import"))
+				{
+					if(ImGui::MenuItem("GLTF"))
+					{
+						import_gltf_open = true;
+					}
+					ImGui::EndMenu();
+				}
+				ImGui::EndMenu();
+			}
+
 			if(ImGui::BeginMenu("Tools"))
 			{
+				auto tool = widget_viewport->get_tool();
+				if(ImGui::MenuItem("Grab", "G", tool == ViewportTool::Translate))
+					widget_viewport->set_tool(ViewportTool::Translate);
+				if(ImGui::MenuItem("Rotate", "R", tool == ViewportTool::Rotate))
+					widget_viewport->set_tool(ViewportTool::Rotate);
+				if(ImGui::MenuItem("Scale", "S", tool == ViewportTool::Scale))
+					widget_viewport->set_tool(ViewportTool::Scale);
+
 				ImGui::EndMenu();
 			}
 
@@ -403,6 +425,31 @@ private:
 
 			ImGui::EndMenuBar();
 		}
+
+		if(import_gltf_open)
+			ImGui::OpenPopup("Import GLTF##modal");
+
+		if(ImGui::BeginPopupModal("Import GLTF##modal", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
+		{
+			static std::string gltf_path = "";
+			ImGui::InputText("Path", &gltf_path);
+			if(ImGui::Button("Import"))
+			{
+				gltf_import_context ctx{.world = world};
+				import_gltf(ctx, gltf_path);
+				import_gltf_open = false;
+				ImGui::CloseCurrentPopup();
+			}
+
+			ImGui::SameLine();
+			if(ImGui::Button("Cancel"))
+			{
+				import_gltf_open = false;
+				ImGui::CloseCurrentPopup();
+			}
+
+			ImGui::EndPopup();
+		}
 	}
 
 
@@ -419,6 +466,8 @@ private:
 
 	std::vector<Transform> tmp_bone_ls;	
 	std::vector<mat4> tmp_bone_ws;
+
+	bool import_gltf_open = false;
 };
 
 }

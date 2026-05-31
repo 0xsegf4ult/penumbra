@@ -94,6 +94,28 @@ export bool imgui_backend_init(Window* window)
 	window->register_key_event_listener
 	([](KeyboardScancode scancode, bool down)
 	{
+		switch(scancode)
+		{
+		case SCANCODE_LCTRL:
+		case SCANCODE_RCTRL:
+	       		ImGui::GetIO().AddKeyEvent(ImGuiMod_Ctrl, down);
+			break;
+		case SCANCODE_LSHIFT:
+		case SCANCODE_RSHIFT:
+			ImGui::GetIO().AddKeyEvent(ImGuiMod_Shift, down);
+			break;
+		case SCANCODE_LALT:
+		case SCANCODE_RALT:
+			ImGui::GetIO().AddKeyEvent(ImGuiMod_Alt, down);
+			break;
+		case SCANCODE_LGUI:
+		case SCANCODE_RGUI:
+			ImGui::GetIO().AddKeyEvent(ImGuiMod_Super, down);
+			break;
+		default:
+			break;
+		}
+	
 		ImGui::GetIO().AddKeyEvent(scancode_to_imgui_key(scancode), down);
 	});
 

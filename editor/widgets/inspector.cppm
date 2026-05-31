@@ -1,11 +1,14 @@
 export module penumbra.editor:inspector;
 
+import :animation_component;
 import :camera_component;
 import :light_components;
 import :render_object_component;
 import :widget;
 import :world_state;
 
+import penumbra.anim;
+import penumbra.core;
 import penumbra.ecs;
 import penumbra.resource;
 import penumbra.renderer;
@@ -281,6 +284,47 @@ private:
 
 			if(dirty)
 				resource_manager_sync_material(rid);
+		}
+	}
+
+	void inspect_animation(animation_component& anim)
+	{
+		if(ImGui::CollapsingHeader("Animation"))
+		{
+			std::string anim_name{"none"};
+			ImGui::InputText("Animation##name", &anim_name);
+			if(ImGui::BeginDragDropTarget())
+			{
+				if(const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("resource_payload"))
+				{
+					ResourceID rid = *reinterpret_cast<ResourceID*>(payload->Data);
+					if(rid.get_type() == ResourceType::Animation && rid.get_handle())
+					{
+						anim.animation = rid;
+					}
+				}
+				ImGui::EndDragDropTarget();
+			}
+			
+			if(ImGui::IsItemDeactivatedAfterEdit())
+			{
+				anim.animation = resource_manager_load_animation(vfs::path{"anim"} / anim_name);
+			}
+			
+			if(anim.animation.get_handle())
+			{
+				Animation& res = resource_manager_get_animation(anim.animation);
+				anim_name = res.name;
+				ImGui::SliderFloat("Time", &anim.cur_time, res.start_time, res.end_time, "%.3fs");
+			
+				if(ImGui::Button(anim.running ? "Stop" : "Start"))
+					anim.running = !anim.running;
+				
+				ImGui::SameLine();
+
+				ImGui::Checkbox("Loop", &anim.loop);
+			}
+
 		}
 	}
 

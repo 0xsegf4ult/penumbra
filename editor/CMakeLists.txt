@@ -1,9 +1,13 @@
 add_executable(editor)
 
-target_link_libraries(editor penumbra::modules)
+target_include_directories(editor PRIVATE ${CMAKE_SOURCE_DIR}/external)
+target_link_libraries(editor PUBLIC penumbra::modules PRIVATE fastgltf::module meshoptimizer ispc_texture_compressor)
 target_sources(editor PUBLIC FILE_SET CXX_MODULES
 	FILES
 	core.cppm
+	import/geometry.cppm
+	import/gltf.cppm
+	import/texture.cppm
 	widgets/inspector.cppm
 	widgets/scenegraph.cppm
 	widgets/viewport.cppm

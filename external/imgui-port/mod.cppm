@@ -21,12 +21,17 @@ export namespace ImGui
 	using ImGui::IsItemEdited;	
 	using ImGui::IsItemHovered;
 	using ImGui::IsItemDeactivatedAfterEdit;
+	using ImGui::IsItemToggledSelection;
+	using ImGui::IsRectVisible;
 	using ImGui::IsMouseDown;
 	using ImGui::IsMouseReleased;
+	using ImGui::IsMouseDoubleClicked;
 	using ImGui::IsKeyDown;
+	using ImGui::IsWindowAppearing;
 	using ImGui::GetWindowWidth;
 	using ImGui::GetWindowHeight;
 	using ImGui::SetNextWindowSize;
+	using ImGui::SetNextWindowContentSize;
 	using ImGui::IsWindowFocused;
 	using ImGui::IsWindowHovered;
 	using ImGui::SetNextWindowPos;
@@ -35,6 +40,9 @@ export namespace ImGui
 	using ImGui::GetWindowPos;
 	using ImGui::GetCursorPosX;
 	using ImGui::GetCursorPosY;
+	using ImGui::GetCursorScreenPos;
+	using ImGui::SetCursorScreenPos;
+	using ImGui::GetFontSize;
 
 	using ImGui::Begin;
 	using ImGui::End;
@@ -55,10 +63,15 @@ export namespace ImGui
 	using ImGui::TreePop;
 	using ImGui::CollapsingHeader;
 	using ImGui::SetTooltip;
+	using ImGui::BeginChild;
+	using ImGui::EndChild;
 
 	using ImGui::GetForegroundDrawList;
 	using ImGui::GetBackgroundDrawList;
+	using ImGui::GetWindowDrawList;
 	using ImGui::GetTextLineHeight;
+	using ImGui::GetTextLineHeightWithSpacing;
+	using ImGui::GetContentRegionAvail;
 	using ImGui::GetID;
 	using ImGui::SameLine;
 	using ImGui::PushStyleVar;
@@ -75,6 +88,7 @@ export namespace ImGui
 	using ImGui::SetColumnWidth;
 		
 	using ImGui::CalcTextSize;
+	using ImGui::GetColorU32;
 
 	using ImGui::Button;
 	using ImGui::InputInt;
@@ -111,6 +125,7 @@ export namespace ImGui
 
 	using ImGui::SetMouseCursor;
 
+	using ImGui::RenderTextEllipsis;
 	using ImGui::ShowDemoWindow;
 }
 
@@ -134,6 +149,7 @@ export using ::ImGuiContext;
 export using ::ImDrawVert;
 export using ::ImDrawIdx;
 export using ::ImVec2;
+export using ::ImVec4;
 export using ::ImColor;
 export using ::ImDrawList;
 export using ::ImDrawCmd;
@@ -220,3 +236,10 @@ export using ::ImGuiMouseCursor;
 export using ::ImGuiMouseCursor_NotAllowed;
 export using ::ImGuiPopupFlags_MouseButtonRight;
 export using ::ImGuiPopupFlags_NoOpenOverItems;
+export using ::ImGuiListClipper;
+export using ::ImGuiChildFlags;
+export using ::ImGuiChildFlags_Borders;
+export using ::ImGuiSelectableFlags;
+export using ::ImGuiSelectableFlags_None;
+export using ::ImGuiCol_Text;
+export using ::ImGuiCol_TextDisabled;
