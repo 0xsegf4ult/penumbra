@@ -76,6 +76,17 @@ export struct VisbufferInfo
 	uvec2 resolution;
 };
 
+export struct geom_skinned_format 
+{
+	vec3 pos;
+	float enc_tangent;
+	vec2 uv;
+	Vector<uint16_t, 2> oct_normal;
+	uint32_t joints;
+	vec4 weights;
+};
+
+
 export using visbuffer_read_hook = std::function<void(GPUCommandBuffer&, VisbufferInfo, uint32_t)>;
 
 export void renderer_init(Window& wnd);
@@ -99,6 +110,10 @@ export void renderer_update_camera(const RenderCameraData& camera);
 export void renderer_update_environment(const RenderEnvironmentData& env);
 export void renderer_add_visbuffer_hook(visbuffer_read_hook&& hook); 
 export void renderer_set_envmap(const RenderEnvironmentMap& envmap);
+export uint32_t renderer_write_skinned_vertices(const geom_skinned_format* data, uint32_t count);
+export uint32_t renderer_skinned_geometry_instantiate(uint32_t skinned_vertex_offset, uint32_t vertex_count, uint32_t bone_count);
+export uint32_t renderer_get_skinned_geometry_vertices(uint32_t handle);
+export void renderer_write_anim_bones(uint32_t sk_instance_handle, const mat4* data, uint32_t count);
 export void renderer_imgui_panel();
 
 }

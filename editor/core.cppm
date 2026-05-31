@@ -123,6 +123,84 @@ public:
 		update_transforms();
 		update_main_camera();
 		update_env();
+
+		for(auto [entity, anim] : world->entities.view<animation_component>().each())
+		{
+			if(!anim.animation.get_handle())
+				continue;
+
+			Animation& res = resource_manager_get_animation(anim.animation);
+
+			if(anim.running)
+				anim.cur_time += dt;
+
+			if(anim.cur_time > res.end_time)
+			{
+				if(!anim.loop)
+					anim.running = false;
+
+				anim.cur_time -= res.end_time;
+			}
+		}
+
+		for(auto [entity, transform, r_anim] : world->entities.view<Transform, render_anim_component>().each())
+		{
+			if(!r_anim.sg_instance || !r_anim.skeleton.get_handle())
+				continue;
+		
+			auto& skeleton = resource_manager_get_skeleton(r_anim.skeleton);
+			tmp_bone_ls.resize(std::max(tmp_bone_ls.size(), size_t(skeleton.bone_count)));
+			tmp_bone_ws.resize(std::max(tmp_bone_ws.size(), size_t(skeleton.bone_count)));
+
+			for(uint32_t i = 0; i < skeleton.bone_count; i++)
+				tmp_bone_ls[i] = skeleton.bone_transforms[i];
+
+			auto* anim_c = world->entities.try_get<animation_component>(entity);
+			if(!anim_c)
+				anim_c = world->entities.try_get<animation_component>(world->entities.get<entity_relationship>(entity).parent);
+
+			if(anim_c && anim_c->animation.get_handle())
+			{
+				Animation& anim = resource_manager_get_animation(anim_c->animation);
+
+				for(auto& channel : anim.channels)
+				{
+					for(auto i = 0zu; i < channel.timestamps.size() - 1; i++)
+					{
+						if((anim_c->cur_time >= channel.timestamps[i]) && (anim_c->cur_time <= channel.timestamps[i + 1]))
+						{
+							float a = (anim_c->cur_time - channel.timestamps[i]) / (channel.timestamps[i + 1] / channel.timestamps[i]);
+							switch(channel.path)
+							{
+							case AnimationPath::Translation:
+								tmp_bone_ls[channel.bone].translation = mix(channel.values_as_vec3()[i], channel.values_as_vec3()[i + 1], a);
+								break;
+							case AnimationPath::Rotation:
+								tmp_bone_ls[channel.bone].rotation = Quaternion::normalize(Quaternion::slerp(channel.values_as_quat()[i], channel.values_as_quat()[i + 1], a));
+								break;
+							case AnimationPath::Scale:
+								tmp_bone_ls[channel.bone].scale = mix(channel.values_as_vec3()[i], channel.values_as_vec3()[i + 1], a);
+								break;
+							}
+						}
+					}
+				}
+				
+			}
+				
+			for(uint32_t i = 0; i < skeleton.bone_count; i++)
+			{
+				if(skeleton.bone_parents[i] > 0)
+					tmp_bone_ws[i] = tmp_bone_ls[i].as_matrix() * tmp_bone_ws[skeleton.bone_parents[i] - 1];
+				else
+					tmp_bone_ws[i] = tmp_bone_ls[i].as_matrix();
+			}
+
+			for(uint32_t i = 0; i < skeleton.bone_count; i++)
+				tmp_bone_ws[i] = skeleton.bone_inv_bind_matrices[i] * tmp_bone_ws[i];
+
+			renderer_write_anim_bones(r_anim.sg_instance, tmp_bone_ws.data(), skeleton.bone_count);
+		}
 	}
 
 	void draw_ui()
@@ -338,6 +416,9 @@ private:
 	GPUTextureDescriptor framebuffer;
 
 	bool sim_running = false;
+
+	std::vector<Transform> tmp_bone_ls;	
+	std::vector<mat4> tmp_bone_ws;
 };
 
 }

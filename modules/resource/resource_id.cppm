@@ -12,6 +12,8 @@ export enum class ResourceType : uint8_t
 	Geometry,
 	Texture,
 	Material,
+	Animation,
+	Skeleton
 };
 
 export struct ResourceID

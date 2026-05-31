@@ -8,10 +8,13 @@ import :resource_id;
 import :geometry;
 import :texture;
 import :material;
+import :animation;
+import :skeleton;
 
 import penumbra.core;
 import penumbra.gpu;
 import penumbra.renderer;
+import penumbra.anim;
 
 import std;
 
@@ -25,8 +28,13 @@ struct resource_context
 	std::vector<GeometryResource> geometry;
 	std::vector<MaterialResource> material;
 	std::vector<TextureResource> texture;
+	std::vector<Animation> animation;
+	std::vector<Skeleton> skeleton;
+
 	std::unordered_map<uint32_t, ResourceID> geometry_cache;
 	std::unordered_map<uint32_t, ResourceID> texture_cache;
+	std::unordered_map<uint32_t, ResourceID> animation_cache;
+	std::unordered_map<uint32_t, ResourceID> skeleton_cache;
 };
 
 resource_context* context = nullptr;
@@ -71,6 +79,20 @@ ResourceID resource_manager_import_texture(std::string_view name, const GPUTextu
 	return rid;
 }
 
+ResourceID resource_manager_import_animation(const Animation& anim)
+{
+	context->animation.emplace_back(std::move(anim));
+	auto rid = ResourceID{ResourceType::Animation, static_cast<uint32_t>(context->animation.size())};
+	return rid;
+}
+
+ResourceID resource_manager_import_skeleton(const Skeleton& skel)
+{
+	context->skeleton.emplace_back(std::move(skel));
+	auto rid = ResourceID{ResourceType::Skeleton, static_cast<uint32_t>(context->skeleton.size())};
+	return rid;
+}
+
 ResourceID resource_manager_load_geometry(const vfs::path& path)
 {
 	auto phash = fnv::hash(path.c_str());
@@ -91,6 +113,8 @@ ResourceID resource_manager_load_geometry(const vfs::path& path)
 		log::error("resource_manager: loading geometry [{}] failed: invalid file", path.string());
 		return ResourceID{};
 	}
+
+	bool is_skinned = (header->vert_format == GeometryFileFormat::VertexFormat::Skinned); 
 
 	uint32_t vcount = 0;
 	uint32_t icount = 0;
@@ -115,15 +139,23 @@ ResourceID resource_manager_load_geometry(const vfs::path& path)
 	memcpy(clusters.data(), data + header->cluster_offset, sizeof(geom_cluster_format) * ccount);
 	memcpy(lods.data(), data + header->lod_offset, sizeof(geom_lod_format) * header->num_lods);
 
-	auto voff = renderer_geometry_push_vertices
-	(
-		reinterpret_cast<const geom_position_format*>(data + header->vpos_offset), 
-		reinterpret_cast<const geom_uv_format*>(data + header->vuv_offset), 
-		reinterpret_cast<const geom_nor_tan_format*>(data + header->vnorms_offset), 
-		vcount
-	);
-	auto ioff = renderer_geometry_push_indices(reinterpret_cast<const geom_index_format*>(data + header->index_offset), icount);
+	uint32_t voff;
 
+	if(is_skinned)
+	{
+		voff = renderer_write_skinned_vertices(reinterpret_cast<const geom_skinned_format*>(data + header->vpos_offset), vcount); 
+	}
+	else
+	{
+		voff = renderer_geometry_push_vertices
+		(
+			reinterpret_cast<const geom_position_format*>(data + header->vpos_offset), 
+			reinterpret_cast<const geom_uv_format*>(data + header->vuv_offset), 
+			reinterpret_cast<const geom_nor_tan_format*>(data + header->vnorms_offset), 
+			vcount
+		);
+	}
+	auto ioff = renderer_geometry_push_indices(reinterpret_cast<const geom_index_format*>(data + header->index_offset), icount);
 	auto coff = renderer_geometry_push_clusters(clusters.data(), ccount);
 	auto loff = renderer_geometry_push_lods(lods.data(), header->num_lods);
 
@@ -141,6 +173,7 @@ ResourceID resource_manager_load_geometry(const vfs::path& path)
 		header->num_lods,
 		header->sphere,
 		renderer_resource_transfer_syncval() + 1,
+		is_skinned
 	});	
 	
 	auto rid = ResourceID{ResourceType::Geometry, static_cast<uint32_t>(context->geometry.size())};
@@ -219,8 +252,128 @@ ResourceID resource_manager_create_material(MaterialResource&& data)
 		.mro = data.mro.get_handle() ? resource_manager_get_texture(data.mro).descriptor.handle : 0u,
 		.normalmap = data.normalmap.get_handle() ? resource_manager_get_texture(data.normalmap).descriptor.handle : 0u,
 		.emissive = data.emissive.get_handle() ? resource_manager_get_texture(data.emissive).descriptor.handle : 0u,
+		.clearcoat = data.clearcoat
 	});
 	auto rid = ResourceID{ResourceType::Material, static_cast<uint32_t>(context->material.size())};
+	return rid;
+}
+
+ResourceID resource_manager_load_animation(const vfs::path& path)
+{
+	auto phash = fnv::hash(path.c_str());
+	if(context->animation_cache.contains(phash))
+		return context->animation_cache[phash];
+
+	auto file = vfs::open(path, vfs::access_readonly);
+	if(!file.has_value())
+	{
+		log::error("resource_manager: loading animation [{}] failed: {}", path.string(), vfs::file_open_error_to_string(file.error()));
+		return ResourceID{};
+	}	
+
+	const auto* pdata = vfs::map<std::byte>(*file, vfs::access_readonly);
+	const auto* header = reinterpret_cast<const AnimationFileFormat::Header*>(pdata);
+
+	if(header->magic != AnimationFileFormat::fmt_magic || header->vmajor != AnimationFileFormat::fmt_major_version)
+	{
+		log::error("resource_manager: loading animation [{}] failed: invalid file", path.string());
+		return ResourceID{};
+
+	}
+
+	Animation anim;
+	anim.name = path.filename().string();
+	anim.channels.resize(header->channel_count);
+
+	const auto* chan_table = reinterpret_cast<const AnimationFileFormat::Channel*>(pdata + header->channel_table_offset);
+	for(uint32_t i = 0; i < header->channel_count; i++)
+	{
+		AnimationChannel& chn = anim.channels[i];
+		chn.timestamps.resize(chan_table[i].keyframe_count);
+		chn.bone = chan_table[i].bone - 1u;
+		chn.path = static_cast<AnimationPath>(chan_table[i].path);
+		chn.interp = static_cast<AnimationInterp>(chan_table[i].interp);
+
+		std::memcpy(chn.timestamps.data(), pdata + chan_table[i].timestamp_offset, sizeof(float) * chan_table[i].keyframe_count);
+
+		anim.start_time = std::min(anim.start_time, chn.timestamps[0]);
+		anim.end_time = std::max(anim.end_time, chn.timestamps.back());
+
+		auto esize_for_path = [](AnimationPath ap) -> size_t
+		{
+			switch(ap)
+			{
+			using enum AnimationPath;
+			case Translation:
+			case Scale:
+				return 3zu;
+			case Rotation:
+				return 4zu;
+			default:
+				std::unreachable();
+			}
+		};
+
+		chn.values.resize(chan_table[i].keyframe_count * esize_for_path(chn.path));
+		std::memcpy(chn.values.data(), pdata + chan_table[i].value_offset, esize_for_path(chn.path) * chan_table[i].keyframe_count * sizeof(float));
+	}
+
+	context->animation.emplace_back(std::move(anim));
+
+	auto rid = ResourceID{ResourceType::Animation, static_cast<uint32_t>(context->animation.size())};
+	context->animation_cache[phash] = rid;
+	return rid;
+}
+
+ResourceID resource_manager_load_skeleton(const vfs::path& path)
+{
+	auto phash = fnv::hash(path.c_str());
+        if(context->skeleton_cache.contains(phash))
+                return context->skeleton_cache[phash];
+
+        auto file = vfs::open(path, vfs::access_readonly);
+        if(!file.has_value())
+        {
+                log::error("resource_manager: loading skeleton [{}] failed: {}", path.string(), vfs::file_open_error_to_string(file.error()));
+                return ResourceID{};
+        }
+
+        const auto* pdata = vfs::map<std::byte>(*file, vfs::access_readonly);
+        const auto* header = reinterpret_cast<const SkeletonFileFormat::Header*>(pdata);
+
+        if(header->magic != SkeletonFileFormat::fmt_magic || header->vmajor != SkeletonFileFormat::fmt_major_version)
+        {
+                log::error("resource_manager: loading skeleton [{}] failed: invalid file", path.string());
+               return ResourceID{};
+
+        }
+
+	Skeleton skel;
+	skel.name = path.filename().string();
+	skel.bone_count = static_cast<uint16_t>(header->bone_count);
+	skel.bone_names.resize(header->bone_count);
+	skel.bone_transforms.resize(header->bone_count);
+	skel.bone_parents.resize(header->bone_count);
+	skel.bone_inv_bind_matrices.resize(header->bone_count);
+
+	const auto* string_table = reinterpret_cast<const char*>(pdata + header->name_table_offset);
+	const auto* transform_table = reinterpret_cast<const Transform*>(pdata + header->transform_table_offset);
+	const auto* parent_table = reinterpret_cast<const uint32_t*>(pdata + header->parent_table_offset);
+	const auto* matrix_table = reinterpret_cast<const mat4*>(pdata + header->matrix_table_offset);
+
+	for(uint32_t i = 0; i < header->bone_count; i++)
+	{
+		skel.bone_names[i] = std::string(string_table);
+		string_table += skel.bone_names[i].length() + 1;
+
+		skel.bone_transforms[i] = transform_table[i];
+		skel.bone_parents[i] = static_cast<uint16_t>(parent_table[i]);
+		skel.bone_inv_bind_matrices[i] = matrix_table[i];
+	}
+
+	context->skeleton.emplace_back(std::move(skel));
+	auto rid = ResourceID{ResourceType::Skeleton, static_cast<uint32_t>(context->skeleton.size())};
+	context->skeleton_cache[phash] = rid;
 	return rid;
 }
 
@@ -245,6 +398,20 @@ MaterialResource& resource_manager_get_material(const ResourceID& rid)
 	return context->material[rid.get_handle() - 1];
 }
 
+Animation& resource_manager_get_animation(const ResourceID& rid)
+{
+	assert(rid.get_type() == ResourceType::Animation);
+	assert(rid.get_handle());
+	return context->animation[rid.get_handle() - 1];
+}
+
+Skeleton& resource_manager_get_skeleton(const ResourceID& rid)
+{
+	assert(rid.get_type() == ResourceType::Skeleton);
+	assert(rid.get_handle());
+	return context->skeleton[rid.get_handle() - 1];
+}
+
 std::span<GeometryResource> resource_manager_get_geometry_storage()
 {
 	return context->geometry;
@@ -258,6 +425,16 @@ std::span<TextureResource> resource_manager_get_texture_storage()
 std::span<MaterialResource> resource_manager_get_material_storage()
 {
 	return context->material;
+}
+
+std::span<Animation> resource_manager_get_animation_storage()
+{
+	return context->animation;
+}
+
+std::span<Skeleton> resource_manager_get_skeleton_storage()
+{
+	return context->skeleton;
 }
 
 void resource_manager_sync_material(const ResourceID& rid)

@@ -68,6 +68,7 @@ export struct GeometryResource
 	uint32_t lod_count;
 	vec4 sphere;
 	uint64_t syncval;
+	bool skinned_vertex;
 };
 
 }

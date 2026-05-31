@@ -89,6 +89,15 @@ struct Shadowmap
 	mat4 view;
 };
 
+struct SkinnedGeometryInstance
+{
+	uint32_t skin_data_offset;
+	uint32_t vertex_offset;
+	uint32_t vertex_count;
+	uint32_t bone_offset;
+	uint32_t bone_count;
+};
+
 struct renderer_context_t
 {
 	Window* window;
@@ -147,6 +156,7 @@ struct renderer_context_t
 	GPUPipeline bloom_filter_cs;
 	GPUPipeline hdr_compose_pso;
 	GPUPipeline brdflut_pso;
+	GPUPipeline skinning_cs;
 
 	bool vb_debug{false}; 
 	std::vector<visbuffer_read_hook> visbuffer_read_hooks;
@@ -169,6 +179,16 @@ struct renderer_context_t
 	float csm_scale{1.0f};
 	std::vector<Shadowmap> shadowmaps;
 	GPUPointer smap_data;
+
+	GPUPointer geometry_skinned_vertices;
+	uint32_t geom_skinned_vert_size{0};
+	uint32_t geom_skinned_vert_capacity{100000};
+
+	GPUPointer anim_bones;
+	uint32_t anim_bones_size{0};
+	uint32_t anim_bones_capacity{16384};
+
+	std::vector<SkinnedGeometryInstance> anim_instances;
 };
 
 renderer_context_t* renderer = nullptr;
@@ -321,6 +341,7 @@ void renderer_init(Window& wnd)
 	imgui_backend_init(renderer->window);
 
 	renderer_geometry_init();
+	renderer->geometry_skinned_vertices = gpu_allocate_memory(sizeof(geom_skinned_format) * renderer->geom_skinned_vert_capacity);
 
 	renderer->render_world.init();
 	renderer->camera_view = renderer->render_world.register_view(false);
@@ -418,13 +439,20 @@ void renderer_init(Window& wnd)
 		.depth_format = GPU_FORMAT_D16_UNORM
 	});
 
+	renderer->skinning_cs = gpu_create_compute_pipeline(load_shader("shaders/geometry_skinning"));
+
 	renderer_csm_init();
 	renderer->smap_data = gpu_allocate_memory(sizeof(mat4) * 1024, GPU_MEMORY_MAPPED);
+	renderer->anim_bones = gpu_allocate_memory(sizeof(mat4) * renderer->anim_bones_capacity, GPU_MEMORY_MAPPED);
 }
 
 void renderer_shutdown()
 {
 	gpu_wait_idle();
+
+	gpu_free_memory(renderer->anim_bones);
+
+	gpu_destroy_pipeline(renderer->skinning_cs);
 
 	gpu_free_memory(renderer->smap_data);
 
@@ -876,6 +904,40 @@ void renderer_update_shadowmaps(GPUCommandBuffer& cmd)
 	}
 }
 
+void renderer_geometry_skinning(GPUCommandBuffer& cmd)
+{
+	gpu_set_pipeline(cmd, renderer->skinning_cs);
+
+	GPUDevicePointer skv = gpu_host_to_device_pointer(renderer->geometry_skinned_vertices);
+	GPUDevicePointer vpos = renderer_geometry_vertex_pos_device_pointer();
+	GPUDevicePointer vuv = renderer_geometry_vertex_uv_device_pointer();
+	GPUDevicePointer vnorm = renderer_geometry_vertex_nor_tan_device_pointer();
+	GPUDevicePointer bone = gpu_host_to_device_pointer(renderer->anim_bones);
+
+	for(auto& sm : renderer->anim_instances)
+	{
+		struct SkinningData
+		{
+			GPUDevicePointer skinned_vertices;
+			GPUDevicePointer vpos;
+			GPUDevicePointer vuv;
+			GPUDevicePointer vnorm;
+			GPUDevicePointer bone_data;
+			uint32_t vertex_count;
+		} shader_data;
+		shader_data.skinned_vertices = skv + (sm.skin_data_offset * sizeof(geom_skinned_format));
+		shader_data.vpos = vpos + (sm.vertex_offset * sizeof(geom_position_format));
+		shader_data.vuv = vuv + (sm.vertex_offset * sizeof(geom_uv_format));
+		shader_data.vnorm = vnorm + (sm.vertex_offset * sizeof(geom_nor_tan_format));
+		shader_data.bone_data = bone + (sm.bone_offset * sizeof(mat4));
+	       	shader_data.vertex_count = sm.vertex_count;	
+
+		gpu_dispatch(cmd, &shader_data, {(sm.vertex_count + 31u) / 32u, 1u, 1u});
+	}
+
+	gpu_barrier(cmd, GPU_STAGE_COMPUTE, GPU_STAGE_VERTEX_SHADER | GPU_STAGE_COMPUTE);
+}
+
 void renderer_forward_passes(GPUCommandBuffer& cmd)
 {
 	gpu_begin_renderpass(cmd,
@@ -950,6 +1012,8 @@ void renderer_process_frame(double dt)
 	auto cmd = gpu_record_commands(GPU_QUEUE_GRAPHICS);
 	gpu_wait_signal(cmd, GPU_STAGE_RASTER_COLOR_OUTPUT, renderer->swapchain_acquire[renderer->frame_index], 0);
 	gpu_texture_layout_transition(cmd, renderer->cur_swapchain, GPU_STAGE_RASTER_COLOR_OUTPUT, GPU_STAGE_RASTER_COLOR_OUTPUT, GPU_TEXTURE_LAYOUT_UNDEFINED, GPU_TEXTURE_LAYOUT_GENERAL);
+
+	renderer_geometry_skinning(cmd);
 
 	renderer->render_world.upload_objects(cmd);
 	renderer->render_world.determine_visibility(cmd);
@@ -1235,6 +1299,53 @@ void renderer_add_visbuffer_hook(visbuffer_read_hook&& hook)
 void renderer_set_envmap(const RenderEnvironmentMap& envmap)
 {
 	renderer->envmap = envmap;
+}
+
+uint32_t renderer_write_skinned_vertices(const geom_skinned_format* data, uint32_t count)
+{
+	auto offset = renderer->geom_skinned_vert_size;
+	if(offset + count >= renderer->geom_skinned_vert_capacity)
+		log::warn("renderer: out of skinned vertex memory!");
+
+	auto& stream_block = stream_buffer_acquire(count);
+	memcpy(gpu_map_memory(stream_block.data + stream_block.head), data, count * sizeof(geom_skinned_format));
+	renderer->bufwrites.push_back({stream_block.data + stream_block.head, renderer->geometry_skinned_vertices + (offset * sizeof(geom_skinned_format)), count * sizeof(geom_skinned_format)});
+	stream_block.head += count * sizeof(geom_skinned_format);
+	stream_block.syncval = renderer->transfer_resource_sync + 1;
+
+	renderer->geom_skinned_vert_size += count;
+	return offset;
+}
+
+uint32_t renderer_skinned_geometry_instantiate(uint32_t skinned_vertex_offset, uint32_t vertex_count, uint32_t bone_count)
+{
+	auto vtx_offset = renderer_geometry_reserve_vertices(vertex_count);
+
+	auto bone_offset = renderer->anim_bones_size;
+	if(bone_offset + bone_count >= renderer->anim_bones_capacity)
+	{
+		log::error("renderer: out of bone memory!");
+		return 0;
+	}
+
+	renderer->anim_instances.push_back({skinned_vertex_offset, vtx_offset, vertex_count, bone_offset, bone_count});
+	renderer->anim_bones_size += bone_count;
+	return static_cast<uint32_t>(renderer->anim_instances.size());
+}
+
+uint32_t renderer_get_skinned_geometry_vertices(uint32_t handle)
+{
+	assert(handle);
+	return renderer->anim_instances[handle - 1].vertex_offset;
+}
+
+void renderer_write_anim_bones(uint32_t sk_instance_handle, const mat4* data, uint32_t count)
+{
+	assert(sk_instance_handle);
+	auto& inst = renderer->anim_instances[sk_instance_handle - 1];
+	assert(count <= inst.bone_count);
+
+	memcpy(gpu_map_memory(renderer->anim_bones + inst.bone_offset * sizeof(mat4)), data, sizeof(mat4) * count);
 }
 
 void renderer_imgui_panel()

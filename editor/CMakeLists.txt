@@ -8,6 +8,7 @@ target_sources(editor PUBLIC FILE_SET CXX_MODULES
 	widgets/scenegraph.cppm
 	widgets/viewport.cppm
 	widgets/widget.cppm
+	world/components/animation.cppm
 	world/components/camera.cppm
 	world/components/lights.cppm
 	world/components/render_object.cppm

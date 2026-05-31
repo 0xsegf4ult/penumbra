@@ -6,9 +6,10 @@ add_subdirectory("gpu")
 add_subdirectory("ui")
 add_subdirectory("renderer")
 add_subdirectory("ecs")
+add_subdirectory("anim")
 add_subdirectory("resource")
 
 add_library(penumbra::modules ALIAS penumbra)
 
 target_compile_features(penumbra INTERFACE cxx_std_23)
-target_link_libraries(penumbra INTERFACE penumbra_core penumbra_math penumbra_gpu penumbra_ui penumbra_renderer penumbra_ecs penumbra_resource)
+target_link_libraries(penumbra INTERFACE penumbra_core penumbra_math penumbra_gpu penumbra_ui penumbra_renderer penumbra_ecs penumbra_anim penumbra_resource)

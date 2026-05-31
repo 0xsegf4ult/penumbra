@@ -6,6 +6,7 @@ export module penumbra.editor:prefab;
 
 import :world_state;
 import :render_object_component;
+import :animation_component;
 
 import penumbra.core;
 import penumbra.math;
@@ -95,6 +96,11 @@ struct PrefabFileFormat
 		uint32_t mesh;
 		uint32_t material;
 	};
+
+	struct SkinnedMeshComponent : public StaticMeshComponent
+	{
+		uint32_t skeleton;
+	};
 };
 
 export void load_prefab(WorldState& world, const vfs::path& path)
@@ -183,7 +189,9 @@ export void load_prefab(WorldState& world, const vfs::path& path)
 			switch(cmp->type)
 			{
 			case PrefabFileFormat::ComponentType::STATIC_MESH:	
+			case PrefabFileFormat::ComponentType::SKINNED_MESH:
 			{
+				auto is_skinned_cmp = (cmp->type == PrefabFileFormat::ComponentType::SKINNED_MESH);
 				const auto* smc = reinterpret_cast<const PrefabFileFormat::StaticMeshComponent*>(cptr);
 				ResourceID geom;
 				if(smc->mesh)
@@ -239,8 +247,18 @@ export void load_prefab(WorldState& world, const vfs::path& path)
 					shadow_levels = 0;
 
 				auto& geom_data = resource_manager_get_geometry(geom);
+				assert(geom_data.skinned_vertex == is_skinned_cmp);
 				
 				auto vtx_offset = geom_data.vertex_offset;
+				if(is_skinned_cmp)
+				{
+					const auto* skc = reinterpret_cast<const PrefabFileFormat::SkinnedMeshComponent*>(cptr);
+
+					auto skeleton = resource_manager_load_skeleton(vfs::path{"anim"} / read_string_table(skc->skeleton));
+					auto sg_instance = renderer_skinned_geometry_instantiate(vtx_offset, geom_data.vertex_count, resource_manager_get_skeleton(skeleton).bone_count); 
+					vtx_offset = renderer_get_skinned_geometry_vertices(sg_instance);
+					graph.emplace<render_anim_component>(node_ent, skeleton, sg_instance);
+				}
 
 				auto rd_object = renderer_world_insert_object
 				({
@@ -257,7 +275,7 @@ export void load_prefab(WorldState& world, const vfs::path& path)
 				}, shadow_levels);
 
 				graph.emplace<render_object_component>(node_ent, geom, material, rd_object);
-				cptr += sizeof(PrefabFileFormat::StaticMeshComponent);
+				cptr += is_skinned_cmp ? sizeof(PrefabFileFormat::SkinnedMeshComponent) : sizeof(PrefabFileFormat::StaticMeshComponent);
 				break;
 			}
 			default:

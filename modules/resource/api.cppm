@@ -6,6 +6,7 @@ import :material;
 import :texture;
 
 import penumbra.core;
+import penumbra.anim;
 import penumbra.gpu;
 
 import std;
@@ -20,18 +21,26 @@ export void resource_manager_shutdown();
 
 export ResourceID resource_manager_import_geometry(const GeometryResource& res);
 export ResourceID resource_manager_import_texture(std::string_view name, const GPUTextureDesc& info, std::span<const std::byte> data);
+export ResourceID resource_manager_import_animation(const Animation& anim);
+export ResourceID resource_manager_import_skeleton(const Skeleton& skel);
 
 export ResourceID resource_manager_load_geometry(const vfs::path& path);
 export ResourceID resource_manager_load_texture(const vfs::path& path);
 export ResourceID resource_manager_create_material(MaterialResource&& data);
+export ResourceID resource_manager_load_animation(const vfs::path& path);
+export ResourceID resource_manager_load_skeleton(const vfs::path& path);
 
 export GeometryResource& resource_manager_get_geometry(const ResourceID& rid);
 export TextureResource& resource_manager_get_texture(const ResourceID& rid);
 export MaterialResource& resource_manager_get_material(const ResourceID& rid);
+export Animation& resource_manager_get_animation(const ResourceID& rid);
+export Skeleton& resource_manager_get_skeleton(const ResourceID& rid);
 
 export std::span<GeometryResource> resource_manager_get_geometry_storage();
 export std::span<TextureResource> resource_manager_get_texture_storage();
 export std::span<MaterialResource> resource_manager_get_material_storage();
+export std::span<Animation> resource_manager_get_animation_storage();
+export std::span<Skeleton> resource_manager_get_skeleton_storage();
 
 export void resource_manager_sync_material(const ResourceID& rid);
 
