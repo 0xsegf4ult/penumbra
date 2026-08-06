@@ -3,6 +3,8 @@ export module penumbra.editor:inspector;
 import :animation_component;
 import :camera_component;
 import :light_components;
+import :particle_components;
+import :physics_components;
 import :render_object_component;
 import :widget;
 import :world_state;
@@ -12,6 +14,7 @@ import penumbra.core;
 import penumbra.ecs;
 import penumbra.resource;
 import penumbra.renderer;
+import penumbra.physics;
 import imgui;
 import std;
 
@@ -108,6 +111,7 @@ public:
 		auto* sl = graph.try_get<spotlight_component>(world->selected_entity);
 		auto* anim = graph.try_get<animation_component>(world->selected_entity);
 		auto* emitter = graph.try_get<emitter_component>(world->selected_entity);
+		auto* rb = graph.try_get<rigidbody_component>(world->selected_entity);
 
 		if(ImGui::Button("Add component"))
 			ImGui::OpenPopup("component_add");
@@ -145,6 +149,11 @@ public:
 			{
 				emitter = &graph.emplace<emitter_component>(world->selected_entity, renderer_create_particlesystem(1024));
 			}	
+
+			if(!rb && ImGui::Selectable("Rigidbody"))
+			{
+
+			}
 
 			ImGui::EndPopup();
 		}
@@ -197,6 +206,11 @@ public:
 		{
 			inspect_animation(*anim);
 		}
+
+		if(rb)
+		{
+			inspect_rigidbody(*rb);
+		}
 	}
 private:
 	bool inspect_transform(Transform& transform)
@@ -240,6 +254,35 @@ private:
 			ImGui::ColorEdit3("Color", &light.color.x);
 			ImGui::DragFloat("Intensity", &light.intensity, 0.1f, 0.0f, 0.0f, "%.0flx");
 		}
+	}
+
+	bool inspect_point_light(point_light_component& light)
+	{
+		bool dirty = false;
+		if(ImGui::CollapsingHeader("Point light"))
+		{
+			dirty |= ImGui::ColorEdit3("Color", &light.color.x);
+			dirty |= ImGui::DragFloat("Intensity", &light.intensity, 0.1f, 0.0f, 0.0f, "%.0flm");
+			dirty |= ImGui::DragFloat("Radius", &light.radius, 0.1f, 0.0f, 0.0f);
+			dirty |= ImGui::Checkbox("Casts shadows", &light.shadowcast);
+		}
+		return dirty;
+	}
+
+	bool inspect_spot_light(spotlight_component& light)
+	{
+		bool dirty = false;
+		if(ImGui::CollapsingHeader("Spotlight"))
+		{
+			dirty |= ImGui::DragFloat3("Direction", &light.direction.x, 0.01f, -1.0f, 1.0f);
+			dirty |= ImGui::ColorEdit3("Color", &light.color.x);
+			dirty |= ImGui::DragFloat("Intensity", &light.intensity, 0.1f, 0.0f, 0.0f, "%.0flm");
+			dirty |= ImGui::DragFloat("Range", &light.range, 0.1f, 0.0f, 0.0f);
+			dirty |= ImGui::DragFloat("Inner cone", &light.inner_cone, 0.1f, 0.0f, light.outer_cone);
+			dirty |= ImGui::DragFloat("Outer cone", &light.outer_cone, 0.1f, light.inner_cone, 180.0f);
+			dirty |= ImGui::Checkbox("Casts shadows", &light.shadowcast);
+		}
+		return dirty;
 	}
 
 	void inspect_material(const ResourceID& rid)
@@ -324,6 +367,14 @@ private:
 
 				ImGui::Checkbox("Loop", &anim.loop);
 			}
+
+		}
+	}
+
+	void inspect_rigidbody(rigidbody_component& rb)
+	{
+		if(ImGui::CollapsingHeader("Rigidbody"))
+		{
 
 		}
 	}

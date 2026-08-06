@@ -1,0 +1,1 @@
+Checks: 'bugprone-*,concurrency-*,cppcore*,misc-*,modernize-*,performance-*,readability-*,-modernize-use-trailing-return-type,-fuschia-overloaded-operator,-misc-include-cleaner,-*namespace-comment*'

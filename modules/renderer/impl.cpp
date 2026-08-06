@@ -76,6 +76,24 @@ struct VisbufferCBuffer
 	float cascade_splits[4];
 	uint32_t cascade_rts[4];
 	GPUDevicePointer smap_data;
+	
+	GPUDevicePointer point_lights;
+        GPUDevicePointer spot_lights;
+        GPUDevicePointer light_clusters;
+        GPUDevicePointer light_counters;
+        GPUDevicePointer point_light_indices;
+        GPUDevicePointer spot_light_indices;
+        GPUDevicePointer point_light_grid;
+        GPUDevicePointer spot_light_grid;
+
+        uint32_t point_light_count;
+        uint32_t spot_light_count;
+        float cluster_scale;
+        float cluster_bias;
+        vec4 cluster_sizes;
+
+        float znear;
+        float zfar;
 };
 
 struct Shadowmap
@@ -96,6 +114,33 @@ struct SkinnedGeometryInstance
 	uint32_t vertex_count;
 	uint32_t bone_offset;
 	uint32_t bone_count;
+};
+
+struct Particle
+{
+	vec3 position;
+	vec3 velocity;
+	vec3 force;
+	vec2 size_begin_end;
+	float size;
+	float life;
+	float max_life;
+};
+
+struct ParticleSystem
+{
+	GPUPointer emitter_cbv;
+	GPUPointer particles;
+	GPUPointer dead_list;
+	GPUPointer alive_list0;
+	GPUPointer alive_list1;
+	GPUPointer counters;
+	GPUPointer arguments;
+
+	uint32_t max_particle_count;
+	uint32_t target_emit_count;
+
+	bool enabled;
 };
 
 struct renderer_context_t
@@ -157,6 +202,15 @@ struct renderer_context_t
 	GPUPipeline hdr_compose_pso;
 	GPUPipeline brdflut_pso;
 	GPUPipeline skinning_cs;
+	GPUPipeline build_light_clusters_cs;
+	GPUPipeline fill_light_clusters_cs;
+	GPUPipeline particle_init_cs;
+	GPUPipeline particle_update_cs;
+	GPUPipeline particle_emit_cs;
+	GPUPipeline particle_simulate_cs;
+	GPUPipeline particle_draw_pso;
+	GPUPipeline debug_line_pso;
+	GPUPipeline debug_point_pso;
 
 	bool vb_debug{false}; 
 	std::vector<visbuffer_read_hook> visbuffer_read_hooks;
@@ -180,6 +234,18 @@ struct renderer_context_t
 	std::vector<Shadowmap> shadowmaps;
 	GPUPointer smap_data;
 
+	GPUPointer point_lights;
+	GPUPointer spot_lights;
+	uint32_t num_point_lights{0u};
+	uint32_t num_spot_lights{0u};
+
+	GPUPointer light_clusters;
+	GPUPointer light_counters;
+	GPUPointer point_light_indices;
+	GPUPointer point_light_grid;
+	GPUPointer spot_light_indices;
+	GPUPointer spot_light_grid;
+
 	GPUPointer geometry_skinned_vertices;
 	uint32_t geom_skinned_vert_size{0};
 	uint32_t geom_skinned_vert_capacity{100000};
@@ -189,6 +255,16 @@ struct renderer_context_t
 	uint32_t anim_bones_capacity{16384};
 
 	std::vector<SkinnedGeometryInstance> anim_instances;
+
+	std::vector<ParticleSystem> particle_systems;
+
+	GPUPointer line_vertex_buffer;
+	GPUPointer dbg_line_data;
+	uint32_t dbg_line_counter{0};
+
+	GPUPointer point_vertex_buffer;
+	GPUPointer dbg_point_data;
+	uint32_t dbg_point_counter{0};	
 };
 
 renderer_context_t* renderer = nullptr;
@@ -346,6 +422,15 @@ void renderer_init(Window& wnd)
 	renderer->render_world.init();
 	renderer->camera_view = renderer->render_world.register_view(false);
 	
+	renderer->point_lights = gpu_allocate_memory(sizeof(RenderLightData) * 1024, GPU_MEMORY_MAPPED);
+	renderer->spot_lights = gpu_allocate_memory(sizeof(RenderLightData) * 1024, GPU_MEMORY_MAPPED);
+	renderer->light_clusters = gpu_allocate_memory(sizeof(vec4) * 2 * 16 * 8 * 24);
+	renderer->light_counters = gpu_allocate_memory(sizeof(uint32_t) * 2);
+	renderer->point_light_indices = gpu_allocate_memory(sizeof(uint32_t) * 16 * 8 * 24 * 64);
+	renderer->spot_light_indices = gpu_allocate_memory(sizeof(uint32_t) * 16 * 8 * 24 * 64);
+	renderer->point_light_grid = gpu_allocate_memory(sizeof(uvec2) * 16 * 8 * 24);
+	renderer->spot_light_grid = gpu_allocate_memory(sizeof(uvec2) * 16 * 8 * 24);
+	
 	renderer->brdflut_pso = gpu_create_graphics_pipeline(load_shader("shaders/brdflut"),
 	{
 		.color_targets = {GPU_FORMAT_RG16_SFLOAT}
@@ -363,6 +448,14 @@ void renderer_init(Window& wnd)
 		vbconst->vertex_nor_tan = renderer_geometry_vertex_nor_tan_device_pointer();
 		vbconst->geom_indices = renderer_geometry_index_device_pointer();
 		vbconst->env_brdf_handle = renderer->brdflut.handle;
+		vbconst->point_lights = gpu_host_to_device_pointer(renderer->point_lights);
+		vbconst->spot_lights = gpu_host_to_device_pointer(renderer->spot_lights);
+		vbconst->light_clusters = gpu_host_to_device_pointer(renderer->light_clusters);
+		vbconst->light_counters = gpu_host_to_device_pointer(renderer->light_counters);
+		vbconst->point_light_indices = gpu_host_to_device_pointer(renderer->point_light_indices);
+		vbconst->spot_light_indices = gpu_host_to_device_pointer(renderer->spot_light_indices);
+		vbconst->point_light_grid = gpu_host_to_device_pointer(renderer->point_light_grid);
+		vbconst->spot_light_grid = gpu_host_to_device_pointer(renderer->spot_light_grid);
 	}
 
 	renderer->stream_buffer.chunks.push_back({gpu_allocate_memory(StreamBuffer::chunk_size, GPU_MEMORY_HOST, GPU_BUFFER_UPLOAD), 0u});
@@ -440,19 +533,77 @@ void renderer_init(Window& wnd)
 	});
 
 	renderer->skinning_cs = gpu_create_compute_pipeline(load_shader("shaders/geometry_skinning"));
+	renderer->build_light_clusters_cs = gpu_create_compute_pipeline(load_shader("shaders/build_light_clusters"));
+	renderer->fill_light_clusters_cs = gpu_create_compute_pipeline(load_shader("shaders/fill_light_clusters"));
+
+	renderer->particle_init_cs = gpu_create_compute_pipeline(load_shader("shaders/particlesystem_initialize"));
+	renderer->particle_update_cs = gpu_create_compute_pipeline(load_shader("shaders/particlesystem_update"));
+	renderer->particle_emit_cs = gpu_create_compute_pipeline(load_shader("shaders/particlesystem_emit"));
+	renderer->particle_simulate_cs = gpu_create_compute_pipeline(load_shader("shaders/particlesystem_simulate"));
+	renderer->particle_draw_pso = gpu_create_graphics_pipeline(load_shader("shaders/particlesystem_draw"),
+	{
+		.color_targets = {GPU_FORMAT_B10GR11_UFLOAT},
+		.depth_format = GPU_FORMAT_D32_SFLOAT
+	});
 
 	renderer_csm_init();
 	renderer->smap_data = gpu_allocate_memory(sizeof(mat4) * 1024, GPU_MEMORY_MAPPED);
 	renderer->anim_bones = gpu_allocate_memory(sizeof(mat4) * renderer->anim_bones_capacity, GPU_MEMORY_MAPPED);
+
+	renderer->debug_line_pso = gpu_create_graphics_pipeline(load_shader("shaders/dbg_primitive"),
+	{
+		.topology = GPU_TOPOLOGY_LINE_LIST,
+		.polymode = GPU_POLYMODE_LINE,
+		.color_targets = {GPU_FORMAT_B10GR11_UFLOAT},
+		.depth_format = GPU_FORMAT_D32_SFLOAT
+	});
+
+	renderer->debug_point_pso = gpu_create_graphics_pipeline(load_shader("shaders/dbg_primitive"),
+	{
+		.topology = GPU_TOPOLOGY_POINT_LIST,
+		.polymode = GPU_POLYMODE_POINT,
+		.color_targets = {GPU_FORMAT_B10GR11_UFLOAT},
+		.depth_format = GPU_FORMAT_D32_SFLOAT
+	});
+
+	renderer->line_vertex_buffer = gpu_allocate_memory(sizeof(vec3) * 4096 * 2 * 2, GPU_MEMORY_MAPPED);
+	renderer->dbg_line_data = gpu_allocate_memory(sizeof(vec4) * 4096, GPU_MEMORY_MAPPED);
+	renderer->point_vertex_buffer = gpu_allocate_memory(sizeof(vec3) * 4096 * 2, GPU_MEMORY_MAPPED);
+	renderer->dbg_point_data = gpu_allocate_memory(sizeof(vec4) * 4096, GPU_MEMORY_MAPPED);
 }
 
 void renderer_shutdown()
 {
 	gpu_wait_idle();
 
+	gpu_free_memory(renderer->dbg_point_data);
+	gpu_free_memory(renderer->point_vertex_buffer);
+	gpu_free_memory(renderer->dbg_line_data);
+	gpu_free_memory(renderer->line_vertex_buffer);
+	gpu_destroy_pipeline(renderer->debug_point_pso);
+	gpu_destroy_pipeline(renderer->debug_line_pso);
+
 	gpu_free_memory(renderer->anim_bones);
 
+	gpu_destroy_pipeline(renderer->particle_draw_pso);
+	gpu_destroy_pipeline(renderer->particle_simulate_cs);
+	gpu_destroy_pipeline(renderer->particle_emit_cs);
+	gpu_destroy_pipeline(renderer->particle_update_cs);
+	gpu_destroy_pipeline(renderer->particle_init_cs);
+	
+	gpu_destroy_pipeline(renderer->fill_light_clusters_cs);
+	gpu_destroy_pipeline(renderer->build_light_clusters_cs);
+
 	gpu_destroy_pipeline(renderer->skinning_cs);
+
+	gpu_free_memory(renderer->spot_light_grid);
+	gpu_free_memory(renderer->point_light_grid);
+	gpu_free_memory(renderer->spot_light_indices);
+	gpu_free_memory(renderer->point_light_indices);
+	gpu_free_memory(renderer->light_counters);
+	gpu_free_memory(renderer->light_clusters);
+	gpu_free_memory(renderer->spot_lights);
+	gpu_free_memory(renderer->point_lights);
 
 	gpu_free_memory(renderer->smap_data);
 
@@ -938,6 +1089,86 @@ void renderer_geometry_skinning(GPUCommandBuffer& cmd)
 	gpu_barrier(cmd, GPU_STAGE_COMPUTE, GPU_STAGE_VERTEX_SHADER | GPU_STAGE_COMPUTE);
 }
 
+void renderer_update_particlesystems(GPUCommandBuffer& cmd, float dt)
+{
+	gpu_set_pipeline(cmd, renderer->particle_update_cs);
+	for(auto& ps : renderer->particle_systems)
+	{
+		if(!ps.enabled)
+			continue;
+
+		struct PSUpdateData
+		{
+			GPUDevicePointer counters;
+			GPUDevicePointer arguments;
+			uint32_t target_emit_count;
+		} shader_data;
+		shader_data.counters = gpu_host_to_device_pointer(ps.counters);
+		shader_data.arguments = gpu_host_to_device_pointer(ps.arguments);
+		shader_data.target_emit_count = ps.target_emit_count;
+
+		gpu_dispatch(cmd, &shader_data, {1u, 1u, 1u});
+	}
+
+	gpu_barrier(cmd, GPU_STAGE_COMPUTE, GPU_STAGE_COMMAND_PROCESSOR | GPU_STAGE_COMPUTE, GPU_HAZARD_INDIRECT_ARGS);
+
+	gpu_set_pipeline(cmd, renderer->particle_emit_cs);
+	for(auto& ps : renderer->particle_systems)
+	{
+		if(!ps.enabled)
+			continue;
+
+		struct PSEmitData
+		{
+			GPUDevicePointer particles;
+			GPUDevicePointer alive_list;
+			GPUDevicePointer dead_list;
+			GPUDevicePointer counters;
+			uint32_t frame_index;
+		} shader_data;
+		shader_data.particles = gpu_host_to_device_pointer(ps.particles);
+		shader_data.alive_list = gpu_host_to_device_pointer(ps.alive_list0);
+		shader_data.dead_list = gpu_host_to_device_pointer(ps.dead_list);
+		shader_data.counters = gpu_host_to_device_pointer(ps.counters);
+		shader_data.frame_index = renderer->frame_counter;
+
+		gpu_write_cbuffer_descriptor(cmd, ps.emitter_cbv);
+		gpu_dispatch_indirect(cmd, &shader_data, ps.arguments);
+	}
+
+	gpu_barrier(cmd, GPU_STAGE_COMPUTE, GPU_STAGE_COMPUTE);
+
+	gpu_set_pipeline(cmd, renderer->particle_simulate_cs);
+	for(auto& ps : renderer->particle_systems)
+	{
+		if(!ps.enabled)
+			continue;
+
+		struct PSSimulateData
+		{
+			GPUDevicePointer particles;
+			GPUDevicePointer alive_list0;
+			GPUDevicePointer alive_list1;
+			GPUDevicePointer dead_list;
+			GPUDevicePointer counters;
+			GPUDevicePointer arguments;
+			float frametime;
+		} shader_data;
+		shader_data.particles = gpu_host_to_device_pointer(ps.particles);
+		shader_data.alive_list0 = gpu_host_to_device_pointer(ps.alive_list0);
+		shader_data.alive_list1 = gpu_host_to_device_pointer(ps.alive_list1);
+		shader_data.dead_list = gpu_host_to_device_pointer(ps.dead_list);
+		shader_data.counters = gpu_host_to_device_pointer(ps.counters);
+		shader_data.arguments = gpu_host_to_device_pointer(ps.arguments);
+		shader_data.frametime = dt;
+
+		gpu_write_cbuffer_descriptor(cmd, ps.emitter_cbv);
+		gpu_dispatch_indirect(cmd, &shader_data, ps.arguments + sizeof(uvec3));
+
+		std::swap(ps.alive_list0, ps.alive_list1);
+	}
+}
+
 void renderer_forward_passes(GPUCommandBuffer& cmd)
 {
 	gpu_begin_renderpass(cmd,
@@ -956,6 +1187,34 @@ void renderer_forward_passes(GPUCommandBuffer& cmd)
 		}
 	});
 	
+	gpu_set_pipeline(cmd, renderer->particle_draw_pso);
+	
+	GPUDepthStencilDesc reverse_z
+	{
+		.depth_mode = GPU_DEPTH_READ | GPU_DEPTH_WRITE,
+		.depth_test = GPU_COMPARE_OP_GREATER
+	};
+	gpu_set_depth_stencil_state(cmd, reverse_z);
+
+	gpu_write_cbuffer_descriptor(cmd, renderer->visbuffer_cbv[renderer->frame_index]);
+
+	struct ParticleDrawData
+	{
+		GPUDevicePointer particles;
+		GPUDevicePointer alive_list;
+	} ps_shader_data;
+
+	for(auto& ps : renderer->particle_systems)
+	{
+		if(!ps.enabled)
+			continue;
+
+		ps_shader_data.particles = gpu_host_to_device_pointer(ps.particles);
+		ps_shader_data.alive_list = gpu_host_to_device_pointer(ps.alive_list0);
+
+		gpu_draw_indirect(cmd, &ps_shader_data, ps.arguments + sizeof(uint32_t) * 6, 1u);
+	}
+
 	gpu_set_pipeline(cmd, renderer->transparent_pbr_pso);
 	gpu_set_cullmode(cmd, GPU_CULLMODE_CW);
 
@@ -988,6 +1247,41 @@ void renderer_forward_passes(GPUCommandBuffer& cmd)
 	auto ds_draw_data = renderer_world_get_bucket(renderer->camera_view, RENDER_BUCKET_TRANSPARENT_DOUBLE_SIDED);
 	gpu_draw_indexed_indirect_count(cmd, &shader_data, ds_draw_data.commands, ds_draw_data.counter, ds_draw_data.max_instance_count);
 
+	gpu_set_pipeline(cmd, renderer->debug_line_pso);
+	gpu_write_cbuffer_descriptor(cmd, renderer->visbuffer_cbv[renderer->frame_index]);
+	
+	GPUDepthStencilDesc ignore
+	{
+		.depth_mode = GPU_DEPTH_READ,
+		.depth_test = GPU_COMPARE_OP_ALWAYS
+	};
+
+	gpu_set_depth_stencil_state(cmd, ignore);
+
+	struct DebugPSOData
+	{
+		GPUDevicePointer vtx_data;
+		GPUDevicePointer inst_data;
+		uint32_t primitive_size;
+	} dbg_data;
+	dbg_data.vtx_data = gpu_host_to_device_pointer(renderer->line_vertex_buffer) + (4096 * 2 * sizeof(vec3) * renderer->frame_index);
+	dbg_data.inst_data = gpu_host_to_device_pointer(renderer->dbg_line_data);
+	dbg_data.primitive_size = 2;
+
+	gpu_draw(cmd, &dbg_data, 2, renderer->dbg_line_counter, 0, 0);
+	
+	gpu_set_pipeline(cmd, renderer->debug_point_pso);
+	gpu_write_cbuffer_descriptor(cmd, renderer->visbuffer_cbv[renderer->frame_index]);
+
+	dbg_data.vtx_data = gpu_host_to_device_pointer(renderer->point_vertex_buffer) + (4096 * sizeof(vec3) * renderer->frame_index);
+	dbg_data.inst_data = gpu_host_to_device_pointer(renderer->dbg_point_data);
+	dbg_data.primitive_size = 1;
+
+	gpu_draw(cmd, &dbg_data, 1, renderer->dbg_point_counter, 0, 0);
+
+	renderer->dbg_line_counter = 0;
+	renderer->dbg_point_counter = 0;
+
 	gpu_end_renderpass(cmd);
 }
 
@@ -1008,15 +1302,28 @@ void renderer_process_frame(double dt)
 	vbconst->env_irradiance_handle = renderer->envmap.irradiance.handle;
 	vbconst->env_prefiltered_handle = renderer->envmap.prefiltered.handle;
 	vbconst->smap_data = gpu_host_to_device_pointer(renderer->smap_data) + (512 * renderer->frame_index * sizeof(mat4));
+	vbconst->cluster_sizes = vec4{std::ceilf(float(renderer->render_resolution.x) / 16.0f), std::ceilf(float(renderer->render_resolution.y) / 8.0f), 0.0f, 0.0f};
+	vbconst->point_light_count = renderer->num_point_lights;
+	vbconst->spot_light_count = renderer->num_spot_lights;
 
 	auto cmd = gpu_record_commands(GPU_QUEUE_GRAPHICS);
 	gpu_wait_signal(cmd, GPU_STAGE_RASTER_COLOR_OUTPUT, renderer->swapchain_acquire[renderer->frame_index], 0);
 	gpu_texture_layout_transition(cmd, renderer->cur_swapchain, GPU_STAGE_RASTER_COLOR_OUTPUT, GPU_STAGE_RASTER_COLOR_OUTPUT, GPU_TEXTURE_LAYOUT_UNDEFINED, GPU_TEXTURE_LAYOUT_GENERAL);
 
+	gpu_set_pipeline(cmd, renderer->build_light_clusters_cs);
+	gpu_write_cbuffer_descriptor(cmd, renderer->visbuffer_cbv[renderer->frame_index]);
+	gpu_dispatch(cmd, nullptr, {1u, 1u, 6u});
+
 	renderer_geometry_skinning(cmd);
 
 	renderer->render_world.upload_objects(cmd);
 	renderer->render_world.determine_visibility(cmd);
+
+	gpu_set_pipeline(cmd, renderer->fill_light_clusters_cs);
+	gpu_write_cbuffer_descriptor(cmd, renderer->visbuffer_cbv[renderer->frame_index]);
+	gpu_dispatch(cmd, nullptr, {1u, 1u, 6u});
+
+	renderer_update_particlesystems(cmd, float(dt));
 
 	renderer_build_visbuffer(cmd);
 	renderer_update_shadowmaps(cmd);
@@ -1223,6 +1530,52 @@ void renderer_write_material(uint32_t offset, const RenderMaterialData& data)
 	memcpy(gpu_map_memory(renderer->materials.data) + (offset * sizeof(RenderMaterialData)), &data, sizeof(RenderMaterialData));
 }
 
+uint32_t renderer_write_point_light(const RenderLightData& data)
+{
+	if(renderer->num_point_lights >= 1024)
+	{
+		log::warn("renderer_write_point_light: out of point light storage memory [1024]");
+		return 0;
+	}
+
+	memcpy(gpu_map_memory(renderer->point_lights) + renderer->num_point_lights * sizeof(RenderLightData), &data, sizeof(RenderLightData));
+	return renderer->num_point_lights++;
+}
+
+uint32_t renderer_write_spot_light(const RenderLightData& data)
+{
+	if(renderer->num_spot_lights >= 1024)
+	{
+		log::warn("renderer_write_spot_light: out of spotlight storage memory [1024]");
+		return 0;
+	}
+	
+	memcpy(gpu_map_memory(renderer->spot_lights) + renderer->num_spot_lights * sizeof(RenderLightData), &data, sizeof(RenderLightData));
+	return renderer->num_spot_lights++;
+}
+
+void renderer_write_point_light(uint32_t offset, const RenderLightData& data)
+{
+	if(offset >= renderer->num_point_lights)
+	{
+		log::warn("renderer_write_point_light: index [{}] out of range", offset);
+		return;
+	}
+
+	memcpy(gpu_map_memory(renderer->point_lights) + offset * sizeof(RenderLightData), &data, sizeof(RenderLightData));
+}
+
+void renderer_write_spot_light(uint32_t offset, const RenderLightData& data)
+{
+	if(offset >= renderer->num_spot_lights)
+	{
+		log::warn("renderer_write_spot_light: index [{}] out of range", offset);
+		return;
+	}
+	
+	memcpy(gpu_map_memory(renderer->spot_lights) + offset * sizeof(RenderLightData), &data, sizeof(RenderLightData));
+}
+
 GPUDevicePointer renderer_materials_device_pointer()
 {
 	return gpu_host_to_device_pointer(renderer->materials.data);
@@ -1279,6 +1632,10 @@ void renderer_update_camera(const RenderCameraData& cam)
 	vbconst->cam_pos = vec4{cam.position, 1.0f};
 	vbconst->exposure = cam.exposure;
 	vbconst->ambient_factor = renderer->ambient_intensity;
+	vbconst->cluster_scale = 24.0f / std::log2f(cam.zfar / cam.znear);
+	vbconst->cluster_bias = -(24.0f * std::log2f(cam.znear) / std::log2f(cam.zfar / cam.znear));
+	vbconst->znear = cam.znear;
+	vbconst->zfar = cam.zfar;
 
 	renderer->render_world.update_view_camera(renderer->camera_view, cam);
 	renderer_update_cascades(vbconst, cam);
@@ -1346,6 +1703,71 @@ void renderer_write_anim_bones(uint32_t sk_instance_handle, const mat4* data, ui
 	assert(count <= inst.bone_count);
 
 	memcpy(gpu_map_memory(renderer->anim_bones + inst.bone_offset * sizeof(mat4)), data, sizeof(mat4) * count);
+}
+
+uint32_t renderer_create_particlesystem(uint32_t max_particles)
+{
+	ParticleSystem ps;
+	ps.enabled = true;
+	ps.target_emit_count = 10u;
+	ps.max_particle_count = max_particles;
+
+	ps.particles = gpu_allocate_memory(sizeof(Particle) * max_particles);
+	ps.dead_list = gpu_allocate_memory(sizeof(uint32_t) * max_particles);
+	ps.alive_list0 = gpu_allocate_memory(sizeof(uint32_t) * max_particles);
+	ps.alive_list1 = gpu_allocate_memory(sizeof(uint32_t) * max_particles);
+
+	ps.counters = gpu_allocate_memory(sizeof(uint32_t) * 4);
+	ps.arguments = gpu_allocate_memory(sizeof(uint32_t) * 10);
+	ps.emitter_cbv = gpu_allocate_memory(sizeof(RenderEmitterData), GPU_MEMORY_MAPPED, GPU_BUFFER_UNIFORM);
+
+	std::default_random_engine rng;
+	auto* cbv = reinterpret_cast<RenderEmitterData*>(gpu_map_memory(ps.emitter_cbv));
+	cbv->transform = mat4::identity();
+	cbv->random_seed = uint32_t(rng());
+
+	auto cmd = gpu_record_commands(GPU_QUEUE_GRAPHICS);
+	gpu_set_pipeline(cmd, renderer->particle_init_cs);
+	struct PSInitData
+	{
+		GPUDevicePointer counters;
+		GPUDevicePointer dead_list;
+		uint32_t max_particle_count;
+	} shader_data;
+	shader_data.counters = gpu_host_to_device_pointer(ps.counters);
+	shader_data.dead_list = gpu_host_to_device_pointer(ps.dead_list);
+	shader_data.max_particle_count = max_particles;
+	gpu_dispatch(cmd, &shader_data, {(max_particles + 255u) / 256u, 1u, 1u});
+	gpu_submit(GPU_QUEUE_GRAPHICS, cmd);
+
+	renderer->particle_systems.emplace_back(std::move(ps));
+	auto handle = static_cast<uint32_t>(renderer->particle_systems.size());
+	return handle;
+}
+
+void renderer_write_particlesystem(uint32_t handle, const RenderEmitterData& emitter)
+{
+	assert(handle);
+	std::memcpy(gpu_map_memory(renderer->particle_systems[handle - 1].emitter_cbv), &emitter, sizeof(RenderEmitterData));
+}
+
+void renderer_debug_line(vec3 begin, vec3 end, vec3 color)
+{
+	auto* vbuf = reinterpret_cast<vec3*>(gpu_map_memory(renderer->line_vertex_buffer)) + (2 * 4096 * renderer->frame_index) + (2 * renderer->dbg_line_counter);
+	*(vbuf + 0) = begin;
+	*(vbuf + 1) = end;
+	auto* line_data = reinterpret_cast<vec4*>(gpu_map_memory(renderer->dbg_line_data)) + renderer->dbg_line_counter;
+	*line_data = vec4{color, 1.0f};
+	++renderer->dbg_line_counter;
+}
+
+void renderer_debug_point(vec3 point, vec3 color)
+{
+	auto* vbuf = reinterpret_cast<vec3*>(gpu_map_memory(renderer->point_vertex_buffer)) + (4096 * renderer->frame_index) + renderer->dbg_point_counter;
+	*vbuf = point;
+	auto* point_data = reinterpret_cast<vec4*>(gpu_map_memory(renderer->dbg_point_data)) + renderer->dbg_point_counter;
+	*point_data = vec4{color, 1.0f};
+	++renderer->dbg_point_counter;
 }
 
 void renderer_imgui_panel()

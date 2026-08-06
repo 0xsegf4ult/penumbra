@@ -9,6 +9,7 @@ import :light_components;
 
 import penumbra.ecs;
 import penumbra.math;
+import penumbra.physics;
 import std;
 
 namespace penumbra
@@ -95,6 +96,13 @@ export struct WorldState
 		add_entity_as_child(entities, root, env);
 		entities.emplace<directional_light_component>(env, vec3{-0.14f, -0.3f, -0.3f}, vec3{0.68f, 0.53f, 0.46f}, 38000.0f);
 //		entities.emplace<directional_light_component>(env, vec3{-0.14f, -0.3f, -0.3f}, vec3{0.53f, 0.57f, 0.78f}, 1.0f);
+
+		phys = physics_create_world(physicsWorldDesc{});
+	}
+
+	~WorldState()
+	{
+		physics_destroy_world(phys);
 	}
 
 	ecs::entity spawn(std::string_view name)
@@ -111,6 +119,7 @@ export struct WorldState
 	ecs::entity selected_entity{ecs::null};
 	ecs::entity main_camera;
 	ecs::entity env;
+	physicsWorldID phys;
 };
 
 }

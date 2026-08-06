@@ -20,4 +20,29 @@ constexpr T mix(const T& a, const T& b, const L& lerp)
 constexpr float fp_epsilon = std::numeric_limits<float>::epsilon();
 constexpr float fp_epsilon_sqr = fp_epsilon * fp_epsilon;
 
+template <typename T>
+bool atomic_min(std::atomic<T>& atomic, const T val)
+{
+	T cur = atomic.load(std::memory_order_relaxed);
+	while(cur > val)
+	{
+		if(atomic.compare_exchange_weak(cur, val, std::memory_order_seq_cst))
+			return true;
+	}
+	
+	return false;
+}
+
+template <typename T>
+bool atomic_max(std::atomic<T>& atomic, const T val)
+{
+	T cur = atomic.load(std::memory_order_relaxed);
+	while(cur < val)
+	{
+		if(atomic.compare_exchange_weak(cur, val, std::memory_order_seq_cst))
+			return true;
+	}
+	return false;
+}
+
 }

@@ -289,6 +289,8 @@ constexpr VkPrimitiveTopology raster_topology_to_vk(GPUTopology topo)
 		return VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP;
 	case GPU_TOPOLOGY_LINE_LIST:
 		return VK_PRIMITIVE_TOPOLOGY_LINE_LIST;
+	case GPU_TOPOLOGY_POINT_LIST:
+		return VK_PRIMITIVE_TOPOLOGY_POINT_LIST;
 	default:
 		std::unreachable();
 	}
@@ -302,6 +304,8 @@ constexpr VkPolygonMode raster_polymode_to_vk(GPUPolyMode mode)
 		return VK_POLYGON_MODE_FILL;
 	case GPU_POLYMODE_LINE:
 		return VK_POLYGON_MODE_LINE;
+	case GPU_POLYMODE_POINT:
+		return VK_POLYGON_MODE_POINT;
 	default:
 		std::unreachable();
 	}
@@ -477,7 +481,7 @@ constexpr std::array<const char*, 1> default_instance_extensions =
 	VK_EXT_DEBUG_UTILS_EXTENSION_NAME
 };
 
-constexpr std::array<const char*, 3> device_extensions =
+constexpr std::array<const char*, 2> device_extensions =
 {
 	VK_KHR_SWAPCHAIN_EXTENSION_NAME,
 	VK_EXT_EXTENDED_DYNAMIC_STATE_3_EXTENSION_NAME
@@ -1224,6 +1228,14 @@ std::optional<uint32_t> get_memory_type(uint32_t type, VkMemoryPropertyFlags fla
 
 GPUPointer gpu_allocate_memory(size_t size, GPUMemoryHeap heap, GPUBufferUsage usage)
 {
+	constexpr const char* heap_names[] = 
+	{
+		"HOST",
+		"PRIVATE",
+		"MAPPED",
+		"READBACK"
+	};
+
 	std::array<uint32_t, 3> indices;
 	indices[0] = gpu_context->queue_data[0].family;
 	indices[1] = gpu_context->queue_data[1].family;

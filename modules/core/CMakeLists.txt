@@ -30,6 +30,8 @@ target_sources(penumbra_core PUBLIC FILE_SET CXX_MODULES FILES
 	input_keys.cppm
 	log.cppm
 	panic.cppm
+	pool_allocator.cppm
+	refcounted.cppm
 	strongly_typed.cppm
 	vfs.cppm
 	window.cppm

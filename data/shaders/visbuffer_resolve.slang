@@ -91,6 +91,56 @@ struct Surface
 	bool has_clearcoat = false;
 };
 
+float3 calculate_point_lighting(uint i, Surface surface)
+{
+	float3 L = consts.point_lights[i].pos_ic.xyz - surface.wpos;
+	float ldist_sqr = dot(L, L);
+	float radius = consts.point_lights[i].color_rad.w;
+	if(ldist_sqr > radius * radius)
+		return float3(0.0);
+
+	L = normalize(L);
+	float3 H = normalize(surface.V + L);
+	float NdotL = saturate(dot(surface.N, L));
+	float NdotH = dot(surface.N, H);
+
+	float NDF = DistributionGGX(max(NdotH, 0.0), surface.roughness);
+	float G = GeometrySmith(surface.NdotV, NdotL, surface.roughness);
+	float3 F = fresnelSchlick(saturate(dot(H, surface.V)), surface.f0);
+
+	float3 specular_contrib = NDF * G * F;
+
+	float inv_radius = rcp(radius);
+	float factor = ldist_sqr * inv_radius * inv_radius;
+	float smooth_factor = max(1.0 - factor * factor, 0.0);
+	float attenuation = (smooth_factor * smooth_factor) / max(ldist_sqr, 1e-4);
+	float3 luminance = consts.point_lights[i].color_rad.rgb * attenuation * NdotL;
+	return (surface.diffuse + specular_contrib) * luminance;
+}
+
+float3 calculate_spot_lighting(uint i, Surface surface)
+{
+	float3 L = normalize(consts.spot_lights[i].pos_ic.xyz - surface.wpos);
+	float theta = dot(L, normalize(-consts.spot_lights[i].dir_oc.xyz));
+	float sp_eps = consts.spot_lights[i].pos_ic.w / consts.spot_lights[i].dir_oc.w;
+	float intensity = saturate((theta - consts.spot_lights[i].dir_oc.w) / sp_eps);
+	if(intensity <= 0.0)
+		return float3(0.0);
+	
+	float3 H = normalize(surface.V + L);
+	
+	float NdotL = saturate(dot(surface.N, L));
+	float NdotH = dot(surface.N, H);
+
+	float NDF = DistributionGGX(max(NdotH, 0.0), surface.roughness);
+	float G = GeometrySmith(surface.NdotV, NdotL, surface.roughness);
+	float3 F = fresnelSchlick(saturate(dot(H, surface.V)), surface.f0);
+	
+	float3 specular_contrib = NDF * G * F;
+	float3 luminance = consts.spot_lights[i].color_rad.rgb * intensity * NdotL;
+	return (surface.diffuse + specular_contrib) * luminance;
+}
+
 float3 calculate_direct_lighting(Surface surface, float depth, float2 svpos)
 {
 	float shadow = 1.0;
@@ -308,6 +358,23 @@ void computeMain(uint groupIndex : SV_GroupIndex, uint2 Gid : SV_GroupID, unifor
 	surface.roughness = max(surface.roughness, 0.045);
 
 	float depth_linear = tmp.z; 
+	uint zIndex = uint(max(log2(-depth_linear) * consts.cluster_scale + consts.cluster_bias, 0.0));
+	uint3 indices = uint3(uint2(svpos.xy / consts.cluster_sizes.xy), zIndex);
+	uint light_cluster = (LIGHT_CLUSTERS_X * LIGHT_CLUSTERS_Y) * indices.z + LIGHT_CLUSTERS_X * ((LIGHT_CLUSTERS_Y - 1) - indices.y) + indices.x;
+
+	Ptr<LightGrid, Access.ReadWrite> pl_grid = consts.point_light_grid + light_cluster;
+	for(uint i = 0; i < pl_grid->count; i++)
+	{
+		uint lidx = consts.point_light_indices[pl_grid->offset + i];
+		l0 += calculate_point_lighting(lidx, surface);
+	}
+
+	Ptr<LightGrid, Access.ReadWrite> sl_grid = consts.spot_light_grid + light_cluster;
+	for(uint i = 0; i < sl_grid->count; i++)
+	{
+		uint lidx = consts.spot_light_indices[sl_grid->offset + i];
+		l0 += calculate_spot_lighting(lidx, surface);
+	}
 
 	l0 += calculate_direct_lighting(surface, tmp.z, svpos);
 

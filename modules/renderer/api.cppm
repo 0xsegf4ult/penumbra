@@ -66,6 +66,26 @@ export struct RenderEnvironmentData
 	float ambient_intensity;
 };
 
+export struct RenderLightData
+{
+	vec4 position_inner_cone;
+	vec4 color_radius;
+	vec4 direction_outer_cone;
+};
+
+export struct RenderEmitterData
+{
+	mat4 transform;
+	vec3 force;
+	float drag;
+	vec3 velocity;
+	float life;
+	float size;
+	float size_scaling;
+	uint32_t random_seed;
+	float random_factor;
+	float life_random_factor;
+	uint32_t flags;
 };
 
 export struct VisbufferInfo
@@ -99,6 +119,10 @@ export uint64_t renderer_resource_transfer_syncval();
 export void renderer_write_texture(GPUTexture texture, std::span<const std::byte> data, uint32_t num_mips = 1, uint32_t num_layers = 1);
 export void renderer_write_material(const RenderMaterialData& data);
 export void renderer_write_material(uint32_t offset, const RenderMaterialData& data);
+export uint32_t renderer_write_point_light(const RenderLightData& data);
+export uint32_t renderer_write_spot_light(const RenderLightData& data);
+export void renderer_write_point_light(uint32_t offset, const RenderLightData& data);
+export void renderer_write_spot_light(uint32_t offset, const RenderLightData& data);
 export GPUDevicePointer renderer_materials_device_pointer();
 export RenderObject renderer_world_insert_object(const RenderObjectDescription& data, uint32_t shadow_level = 4);
 export void renderer_world_update_object(RenderObject handle, const mat4& transform);
@@ -114,6 +138,10 @@ export uint32_t renderer_write_skinned_vertices(const geom_skinned_format* data,
 export uint32_t renderer_skinned_geometry_instantiate(uint32_t skinned_vertex_offset, uint32_t vertex_count, uint32_t bone_count);
 export uint32_t renderer_get_skinned_geometry_vertices(uint32_t handle);
 export void renderer_write_anim_bones(uint32_t sk_instance_handle, const mat4* data, uint32_t count);
+export uint32_t renderer_create_particlesystem(uint32_t max_particles);
+export void renderer_write_particlesystem(uint32_t handle, const RenderEmitterData& emitter);
+export void renderer_debug_line(vec3 begin, vec3 end, vec3 color);
+export void renderer_debug_point(vec3 point, vec3 color);
 export void renderer_imgui_panel();
 
 }

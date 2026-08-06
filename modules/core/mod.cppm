@@ -5,6 +5,8 @@ export import :hash;
 export import :input_keys;
 export import :log;
 export import :panic;
+export import :pool_allocator;
+export import :refcounted;
 export import :strongly_typed;
 export import :vfs;
 export import :window;

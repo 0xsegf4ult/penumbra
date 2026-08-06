@@ -103,7 +103,7 @@ struct texture_info
 };
 
 template <typename T>
-constexpr static T* access_uv(const texture_info& tex, const subresource_info& subres, const uvec2& coords)
+constexpr T* access_uv(const texture_info& tex, const subresource_info& subres, const uvec2& coords)
 {
 	uint32_t bd = format_blockdim(tex.src_fmt);
        	return reinterpret_cast<T*>(tex.pixels.data() + subres.byte_offset) + (coords.y * (subres.width + bd - 1) / bd) + coords.x;

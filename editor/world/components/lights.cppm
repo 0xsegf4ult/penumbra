@@ -1,7 +1,8 @@
 export module penumbra.editor:light_components;
 
 import penumbra.math;
-
+import std;
+using std::uint32_t;
 
 namespace penumbra
 {
@@ -18,6 +19,7 @@ export struct point_light_component
 	vec3 color{1.0f};
 	float intensity{1500.0f};
 	float radius{5.0f};
+	uint32_t offset{0u};
 	bool shadowcast{true};
 };
 
@@ -29,6 +31,7 @@ export struct spotlight_component
 	float range{16.0f};
 	float inner_cone{42.5f};
 	float outer_cone{45.0f};
+	uint32_t offset{0u};
 	bool shadowcast{true};
 };
 

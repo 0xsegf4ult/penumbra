@@ -5,6 +5,7 @@ import penumbra.gpu;
 import penumbra.renderer;
 import penumbra.resource;
 import penumbra.ui;
+import penumbra.physics;
 import std;
 
 import penumbra.editor;
@@ -24,6 +25,7 @@ int main(int argc, const char** argv)
 
 	renderer_init(window);
 	resource_manager_init();
+	physics_init_rigidbody_storage();
 
 	auto start = std::chrono::steady_clock::now();
 	auto world_state = std::make_unique<WorldState>();
@@ -97,6 +99,7 @@ int main(int argc, const char** argv)
 	gpu_wait_idle();
 	editor.reset();
 
+	physics_shutdown_rigidbody_storage();
 	resource_manager_shutdown();
 	renderer_shutdown();
 

@@ -4,6 +4,7 @@ import penumbra.core;
 import penumbra.gpu;
 import penumbra.renderer;
 import penumbra.ui;
+import penumbra.physics;
 
 import imgui;
 import std;
@@ -11,7 +12,9 @@ import std;
 import :envmap;
 import :prefab;
 import :camera_component;
+import :physics_components;
 import :inspector;
+import :resource_window;
 import :scenegraph;
 import :widget;
 import :viewport;
@@ -34,6 +37,7 @@ public:
 		widgets.push_back(std::make_unique<Viewport>(&wnd, &framebuffer, world));
 		widget_viewport = reinterpret_cast<Viewport*>(widgets.back().get());
 
+		widgets.push_back(std::make_unique<ResourceWindow>());
 		widgets.push_back(std::make_unique<ScenegraphView>(world));
 		widgets.push_back(std::make_unique<Inspector>(world));
 
@@ -50,6 +54,93 @@ public:
 			def_prefab = argv[1];
 
 		load_prefab(*world, def_prefab);
+
+		if(def_prefab == "qmv_arena")
+		{
+			ecs::entity floor_ent;
+			for(auto&& [entity, name]: world->entities.view<entity_name>().each())
+			{
+				if(name == "qmv_floor")
+				{
+					floor_ent = entity;	
+					break;
+				}
+			}
+			auto floor_xform = world->entities.get<Transform>(floor_ent);
+
+			auto floor_shape = physics_create_box({.edges = vec3{50.0f, 0.1f, 50.0f}});
+			auto floor_rb = physics_create_body(world->phys, 
+			{
+				.initial_transform = floor_xform,
+				.shape = floor_shape
+			});
+			pdbg_ec_target = floor_ent;
+
+			world->entities.emplace<rigidbody_component>(floor_ent, floor_rb);
+
+			auto test_entity = world->spawn("test_entity");
+			pdbg_ec_source = test_entity;
+			add_entity_as_child(world->entities, world->root, test_entity);
+			Transform te_xf{vec3{0.0f, 5.5f, 0.0f}, Quaternion{}, vec3{1.0f}};
+			world->entities.replace<Transform>(test_entity, te_xf);
+
+			ResourceID def_mat;
+			auto capsule = resource_manager_load_geometry("meshes/capsule");  
+			auto& caps_data = resource_manager_get_geometry(capsule);
+		
+			auto rd_object = renderer_world_insert_object
+			({
+				world->entities.get<Transform>(test_entity).as_matrix(),
+				RENDER_BUCKET_DEFAULT,
+				caps_data.sphere,
+				def_mat.get_handle(),
+				caps_data.l0_cluster_count,
+				caps_data.lod_offset,
+				caps_data.lod_count,
+				caps_data.vertex_offset,
+				caps_data.index_offset,
+				caps_data.cluster_offset
+			}, 4);
+			world->entities.emplace<render_object_component>(test_entity, capsule, def_mat, rd_object);
+			auto caps_shape = physics_create_capsule({.radius = 0.5f, .height = 1.0f});
+			auto caps_rb = physics_create_body(world->phys, 
+			{
+				.initial_transform = te_xf,
+				.shape = caps_shape
+			});
+			world->entities.emplace<rigidbody_component>(test_entity, caps_rb);
+
+			auto box = world->spawn("box");
+			pdbg_ec_target = box;
+			add_entity_as_child(world->entities, world->root, box);
+			Transform bo_xf{vec3{0.0f, 1.5f, 0.0f}, Quaternion{}, vec3{1.0f}};
+			world->entities.replace<Transform>(box, bo_xf);
+
+			auto boxg = resource_manager_load_geometry("meshes/unit_cube");
+			auto& box_data = resource_manager_get_geometry(boxg);
+
+			auto b_rd_object = renderer_world_insert_object
+			({
+				bo_xf.as_matrix(),
+				RENDER_BUCKET_DEFAULT,
+				box_data.sphere,
+				def_mat.get_handle(),
+				box_data.l0_cluster_count,
+				box_data.lod_offset,
+				box_data.lod_count,
+				box_data.vertex_offset,
+				box_data.index_offset,
+				box_data.cluster_offset
+			}, 4);
+			world->entities.emplace<render_object_component>(box, boxg, def_mat, b_rd_object);
+			auto box_shape = physics_create_box({.edges=vec3{1.0f, 1.0f, 1.0f}});
+			auto box_rb = physics_create_body(world->phys,
+			{
+				.initial_transform = bo_xf,
+				.shape = box_shape
+			});
+			world->entities.emplace<rigidbody_component>(box, box_rb);
+		}
 	}
 
 	~Editor()
@@ -59,6 +150,9 @@ public:
 
 	void fixed_update(double dt)
 	{
+		for(auto [entity, transform, rb] : world->entities.view<Transform, rigidbody_component>().each())
+			physics_body_set_transform(rb.handle, transform);
+
 	}
 		
 	void variable_update(double dt)
@@ -242,6 +336,8 @@ public:
 			widget->draw();
 
 		ImGui::End();
+
+		physics_debug();
 	}
 private:
 	void create_rendertarget()
@@ -452,6 +548,131 @@ private:
 		}
 	}
 
+	void physics_debug()
+	{
+		bool has_rc = true;
+
+		
+		ImGui::Begin("Physics Debug");
+		static char ec_name[128] = "";
+		ImGui::InputTextWithHint("Source entity", "no source", ec_name, 128);
+		if(ImGui::BeginDragDropTarget())
+		{
+			if(const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("drag_and_drop_ecs_entity"))
+			{
+				pdbg_ec_source= *static_cast<ecs::entity*>(payload->Data);
+				if(pdbg_ec_source != ecs::null)
+				{
+					auto& nname = world->entities.get<entity_name>(pdbg_ec_source);
+					std::strncpy(ec_name, nname.c_str(), std::min(127zu, nname.length()));
+					ec_name[nname.length()] = '\0';
+				}
+			}
+			ImGui::EndDragDropTarget();
+		}
+		if(pdbg_ec_source != ecs::null && !world->entities.try_get<rigidbody_component>(pdbg_ec_source))
+		{
+			has_rc = false;
+			ImGui::TextColored(ImColor(1.0f, 1.0f, 0.0f, 1.0f), "Entity does not have Rigidbody component!");
+		}
+
+		static char ect_name[128] = "";
+		ImGui::InputTextWithHint("Target entity", "no target", ect_name, 128);
+		if(ImGui::BeginDragDropTarget())
+		{
+			if(const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("drag_and_drop_ecs_entity"))
+			{
+				pdbg_ec_target = *static_cast<ecs::entity*>(payload->Data);
+				if(pdbg_ec_target != ecs::null)
+				{
+					auto& nname = world->entities.get<entity_name>(pdbg_ec_target);
+					std::strncpy(ect_name, nname.c_str(), std::min(127zu, nname.length()));
+					ect_name[nname.length()] = '\0';
+				}
+			}
+			ImGui::EndDragDropTarget();
+		}
+		if(pdbg_ec_target != ecs::null && !world->entities.try_get<rigidbody_component>(pdbg_ec_target))
+		{
+			has_rc = false;
+			ImGui::TextColored(ImColor(1.0f, 1.0f, 0.0f, 1.0f), "Entity does not have Rigidbody component!");
+		}
+
+		ImGui::Combo("psim mode", &psim_mode, "gjk_distance\0gjk_cast\0\0");
+
+		if(pdbg_ec_source != ecs::null && pdbg_ec_target != ecs::null && has_rc)
+		{
+			if(psim_mode == 0)
+			{
+			
+			auto body1 = world->entities.get<rigidbody_component>(pdbg_ec_source).handle;
+			auto body2 = world->entities.get<rigidbody_component>(pdbg_ec_target).handle;
+
+			auto transform_a = physics_body_get_transform(body1);
+
+			physicsDistanceInput gcfg
+			{
+				.shape_a = physics_body_get_shape(body1),
+				.shape_b = physics_body_get_shape(body2),
+				.transform_a = transform_a,
+				.transform_b = physics_body_get_transform(body2)
+			};
+			
+			auto res = physics_shape_distance(gcfg);
+
+			vec3 p_a = (vec4{res.point_a, 1.0f} * transform_a.as_matrix()).demote<3>();
+			vec3 p_b = (vec4{res.point_b, 1.0f} * transform_a.as_matrix()).demote<3>();
+
+			int cstatus = 2;
+			float sum_cvr = gcfg.shape_a.get_convex_radius() + gcfg.shape_b.get_convex_radius();
+			auto dst = res.distance;
+
+			if(dst > sum_cvr)
+			{
+				cstatus = 0;
+				ImGui::Text("Not colliding: dist %.6f", dst - sum_cvr);
+			}
+			else if(dst > 0.0f)
+			{
+				cstatus = 1;
+				ImGui::Text("Collision: dist %.6f", dst - sum_cvr);
+			}
+			else
+				ImGui::Text("Collision indeterminate: dist %.6f", dst - sum_cvr);
+			renderer_debug_line(p_a + (res.normal * gcfg.shape_a.get_convex_radius() / dst), p_b - (res.separating_axis * gcfg.shape_b.get_convex_radius() / dst), vec3{cstatus == 1 ? 1.0f : 0.0f, cstatus == 0 ? 1.0f : 0.0f, cstatus == 2 ? 1.0f : 0.0f});
+
+			renderer_debug_line(p_a, p_a + res.normal * dst, vec3{1.0f, 0.0f, 0.0f});
+
+			}
+			else if(psim_mode == 1)
+			{
+			
+			auto mover = world->entities.get<rigidbody_component>(pdbg_ec_source).handle;
+			auto target = world->entities.get<rigidbody_component>(pdbg_ec_target).handle;
+
+			static vec3 gjk_cast_dir{0.0f, -2.0f, 0.0f};
+
+			auto cres = physics_shape_cast
+			({
+				physics_body_get_shape(target),
+				physics_body_get_shape(mover),
+				physics_body_get_transform(target),
+				physics_body_get_transform(mover),
+				gjk_cast_dir
+			});
+
+			if(cres.hit)
+			{
+				ImGui::Text("Fraction %.6f", cres.fraction);
+			}
+			else
+				ImGui::Text("Cast did not hit");
+
+			}
+		}
+
+		ImGui::End();
+	}
 
 	Window& window;
 	WorldState* world;
@@ -468,6 +689,10 @@ private:
 	std::vector<mat4> tmp_bone_ws;
 
 	bool import_gltf_open = false;
+
+	ecs::entity pdbg_ec_source{ecs::null};
+	ecs::entity pdbg_ec_target{ecs::null};
+	int psim_mode{0};
 };
 
 }

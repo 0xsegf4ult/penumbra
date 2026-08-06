@@ -72,6 +72,13 @@ private:
 		if(ImGui::IsMouseDown(ImGuiMouseButton_Left) && ImGui::IsItemHovered())
 			world->selected_entity = ent;
 
+		if(ImGui::BeginDragDropSource(ImGuiDragDropFlags_None))
+		{
+			ImGui::SetDragDropPayload("drag_and_drop_ecs_entity", &ent, sizeof(ecs::entity));
+			ImGui::Text("%s", graph.get<entity_name>(ent).c_str());
+			ImGui::EndDragDropSource();
+		}
+
 		bool wants_delete = false;
 		if(ImGui::BeginPopupContextItem())
 		{

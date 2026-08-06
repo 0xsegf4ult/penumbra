@@ -9,12 +9,15 @@ target_sources(editor PUBLIC FILE_SET CXX_MODULES
 	import/gltf.cppm
 	import/texture.cppm
 	widgets/inspector.cppm
+	widgets/resources.cppm
 	widgets/scenegraph.cppm
 	widgets/viewport.cppm
 	widgets/widget.cppm
 	world/components/animation.cppm
 	world/components/camera.cppm
 	world/components/lights.cppm
+	world/components/particlesystem.cppm
+	world/components/physics.cppm
 	world/components/render_object.cppm
 	world/envmap.cppm
 	world/prefab.cppm
