@@ -1,0 +1,9 @@
+#pragma once
+
+#include <penumbra/types.hpp>
+
+namespace penumbra::config
+{
+	constexpr const char* git_hash = "@GIT_HASH@";
+	constexpr size_t renderer_frames_in_flight = 2;
+}

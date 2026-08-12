@@ -6,7 +6,7 @@ set(SPDLOG_USE_STD_FORMAT ON CACHE BOOL "" FORCE)
 set(SPDLOG_NO_EXCEPTIONS ON CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(spdlog)
 
-add_subdirectory("imgui-port")
+add_subdirectory("imgui")
 
 FetchContent_Declare(entt URL https://github.com/skypjack/entt/archive/refs/tags/v3.16.0.zip)
 FetchContent_MakeAvailable(entt)
@@ -18,8 +18,6 @@ FetchContent_MakeAvailable(tracy)
 
 if(PENUMBRA_BUILD_EDITOR)
 	FetchContent_Declare(fastgltf URL https://github.com/spnda/fastgltf/archive/refs/tags/v0.9.0.zip)
-	set(FASTGLTF_ENABLE_CPP_MODULES ON CACHE BOOL "" FORCE)
-	set(FASTGLTF_USE_STD_MODULE ON CACHE BOOL "" FORCE)
 	FetchContent_MakeAvailable(fastgltf)
 
 	FetchContent_Declare(meshoptimizer URL https://github.com/zeux/meshoptimizer/archive/refs/tags/v1.0.zip)

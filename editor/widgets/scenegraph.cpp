@@ -1,0 +1,119 @@
+#include <widgets/scenegraph.hpp>
+#include <widgets/widget.hpp>
+#include <world/state.hpp>
+
+#include <penumbra/ecs.hpp>
+#include <penumbra/ui.hpp>
+#include <penumbra/types.hpp>
+
+namespace penumbra
+{
+
+ScenegraphView::ScenegraphView(WorldState* ws) : Widget("World"), world{ws} {}
+
+void ScenegraphView::on_draw()
+{
+	if(!world)
+		return;
+
+	u32 ctr = 0;
+	ecs::entity cur = world->entities.get<entity_relationship>(world->root).first_child;
+	while(world->entities.valid(cur))
+	{
+		auto wants_delete = tree_draw(cur, ctr);
+		if(wants_delete)
+			break;
+
+		cur = world->entities.get<entity_relationship>(cur).next_sibling;
+	}
+
+	if(ImGui::IsMouseDown(ImGuiMouseButton_Left) && ImGui::IsWindowHovered())
+		world->selected_entity = ecs::null;
+
+	if(ImGui::BeginPopupContextWindow("Create", ImGuiPopupFlags_MouseButtonRight | ImGuiPopupFlags_NoOpenOverItems))
+	{
+		if(ImGui::MenuItem("Entity"))
+		{
+			auto ent = world->spawn("Entity");
+			add_entity_as_child(world->entities, (world->selected_entity != ecs::null) ? world->selected_entity : world->root, ent);
+		}
+
+		ImGui::EndPopup();
+	}
+}
+
+bool ScenegraphView::tree_draw(ecs::entity ent, u32& ctr)
+{
+	auto& graph = world->entities;
+
+	ImGui::PushID(ctr);
+	ctr++;
+
+	ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_OpenOnArrow;
+
+	bool leaf = false;
+	if(ctr != 0 && !graph.valid(graph.get<entity_relationship>(ent).first_child))
+	{
+		leaf = true;
+		flags |= ImGuiTreeNodeFlags_Leaf;
+	}
+
+	if(world->selected_entity == ent)
+		flags |= ImGuiTreeNodeFlags_Selected;
+
+	bool node_open = ImGui::TreeNodeEx(graph.get<entity_name>(ent).c_str(), flags);
+	
+	if(ImGui::IsMouseDown(ImGuiMouseButton_Left) && ImGui::IsItemHovered())
+		world->selected_entity = ent;
+
+	if(ImGui::BeginDragDropSource(ImGuiDragDropFlags_None))
+	{
+		ImGui::SetDragDropPayload("drag_and_drop_ecs_entity", &ent, sizeof(ecs::entity));
+		ImGui::Text("%s", graph.get<entity_name>(ent).c_str());
+		ImGui::EndDragDropSource();
+	}
+
+	bool wants_delete = false;
+	if(ImGui::BeginPopupContextItem())
+	{
+		bool is_protected = (ent == world->main_camera) || (ent == world->env);
+		ImGui::BeginDisabled(is_protected || leaf);
+		if(ImGui::MenuItem("Delete"))
+			wants_delete = true;
+		ImGui::EndDisabled();
+
+		ImGui::EndPopup();
+	}
+
+	if(node_open)
+	{
+		ecs::entity cur = graph.get<entity_relationship>(ent).first_child;
+		while(graph.valid(cur))
+		{
+			auto wants_delete = tree_draw(cur, ctr);
+			if(wants_delete)
+				break;
+
+			cur = graph.get<entity_relationship>(cur).next_sibling;
+		}
+
+		ImGui::TreePop();
+	}
+	
+
+	if(wants_delete)
+	{
+		if(world->selected_entity == ent)
+			world->selected_entity = ecs::null;
+
+		unlink_entity(graph, ent);
+
+		graph.destroy(ent);
+	}
+	
+	ImGui::PopID();
+
+	return wants_delete;
+}
+
+}

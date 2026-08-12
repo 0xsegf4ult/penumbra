@@ -1,0 +1,36 @@
+#include <penumbra/ui.hpp>
+#include <penumbra/gpu.hpp>
+#include <penumbra/config.hpp>
+#include <penumbra/types.hpp>
+
+namespace penumbra::ui
+{
+
+void draw_device_overlay(uvec2 root)
+{
+	const float fps = ImGui::GetIO().Framerate;
+	static bool p_open = true;
+	ImGui::SetNextWindowPos(ImVec2(static_cast<float>(root.x), static_cast<float>(root.y)), ImGuiCond_Always);
+	const ImGuiWindowFlags wflags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoInputs;
+	ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(1.0f, 1.0f));
+	ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(1.0f, 1.0f));
+	ImGui::Begin("device_overlay", &p_open, wflags);
+
+	ImGui::Text("penumbra git-%s", config::git_hash);
+
+	const auto& gpu_props = gpu_get_properties();
+	ImGui::Text("%s", gpu_props.device_name.c_str());
+
+	ImColor fps_color = ImColor(20, 220, 20, 255);
+	if(fps < 45.0f)
+		fps_color = ImColor(220, 20, 20, 255);
+	else if(fps < 59.0f)
+		fps_color = ImColor(180, 220, 20, 255);
+
+	ImGui::TextColored(fps_color, "%.0f FPS (%.2f mspf)", fps, 1000.0f / fps);
+	
+	ImGui::End();
+	ImGui::PopStyleVar(2);
+}
+
+}

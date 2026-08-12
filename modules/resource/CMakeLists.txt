@@ -1,16 +1,7 @@
 add_library(penumbra_resource STATIC "")
 
-target_link_libraries(penumbra_resource PRIVATE penumbra_core penumbra_math penumbra_gpu penumbra_renderer penumbra_anim)
-
-target_sources(penumbra_resource PUBLIC FILE_SET CXX_MODULES
-	FILES
-	api.cppm
-	animation.cppm
-	geometry.cppm
-	material.cppm
-	mod.cppm
-	resource_id.cppm
-	skeleton.cppm
-	texture.cppm
+target_link_libraries(penumbra_resource PRIVATE penumbra_core penumbra_gpu penumbra_renderer)
+target_include_directories(penumbra_resource PUBLIC ${CMAKE_SOURCE_DIR}/include PRIVATE ${CMAKE_SOURCE_DIR}/modules)
+target_sources(penumbra_resource
 	PRIVATE
-	impl.cpp)
+	resource.cpp)

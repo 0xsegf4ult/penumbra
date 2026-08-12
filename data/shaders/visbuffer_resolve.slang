@@ -361,7 +361,7 @@ void computeMain(uint groupIndex : SV_GroupIndex, uint2 Gid : SV_GroupID, unifor
 	uint zIndex = uint(max(log2(-depth_linear) * consts.cluster_scale + consts.cluster_bias, 0.0));
 	uint3 indices = uint3(uint2(svpos.xy / consts.cluster_sizes.xy), zIndex);
 	uint light_cluster = (LIGHT_CLUSTERS_X * LIGHT_CLUSTERS_Y) * indices.z + LIGHT_CLUSTERS_X * ((LIGHT_CLUSTERS_Y - 1) - indices.y) + indices.x;
-
+/*
 	Ptr<LightGrid, Access.ReadWrite> pl_grid = consts.point_light_grid + light_cluster;
 	for(uint i = 0; i < pl_grid->count; i++)
 	{
@@ -375,7 +375,7 @@ void computeMain(uint groupIndex : SV_GroupIndex, uint2 Gid : SV_GroupID, unifor
 		uint lidx = consts.spot_light_indices[sl_grid->offset + i];
 		l0 += calculate_spot_lighting(lidx, surface);
 	}
-
+*/
 	l0 += calculate_direct_lighting(surface, tmp.z, svpos);
 
 	float horizon = min(1.0 + dot(reflection, surface.N), 1.0);

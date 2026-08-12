@@ -1,4 +1,4 @@
-add_library(penumbra_ecs STATIC "")
+add_library(penumbra_ecs INTERFACE "")
 
-target_link_libraries(penumbra_ecs PUBLIC EnTT::EnTT)
-target_sources(penumbra_ecs PUBLIC FILE_SET CXX_MODULES FILES mod.cppm)
+target_link_libraries(penumbra_ecs INTERFACE EnTT::EnTT)
+target_include_directories(penumbra_ecs INTERFACE ${CMAKE_SOURCE_DIR}/include)

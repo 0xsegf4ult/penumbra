@@ -1,0 +1,21 @@
+#pragma once
+
+#include <penumbra/array_proxy.hpp>
+#include <penumbra/config.hpp>
+#include <penumbra/cvar.hpp>
+#include <penumbra/ecs.hpp>
+#include <penumbra/gpu.hpp>
+#include <penumbra/hash.hpp>
+#include <penumbra/input.hpp>
+#include <penumbra/input_keys.hpp>
+#include <penumbra/log.hpp>
+#include <penumbra/math.hpp>
+#include <penumbra/panic.hpp>
+#include <penumbra/physics.hpp>
+#include <penumbra/renderer.hpp>
+#include <penumbra/resource.hpp>
+#include <penumbra/shader.hpp>
+#include <penumbra/types.hpp>
+#include <penumbra/ui.hpp>
+#include <penumbra/vfs.hpp>
+#include <penumbra/window.hpp>

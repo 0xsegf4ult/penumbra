@@ -1,29 +1,35 @@
 #include "slang-com-ptr.h"
 #include "slang.h"
 
-import std;
-import penumbra.gpu;
+#include <penumbra/gpu.hpp>
+#include <penumbra/shader.hpp>
+#include <penumbra/types.hpp>
 
-using std::uint32_t, std::size_t;
+#include <array>
+#include <fstream>
+#include <filesystem>
+#include <print>
+#include <string>
+
 using Slang::ComPtr;
 using namespace std::literals::string_view_literals;
 
 struct CompileContext
 {
-	uint32_t cbuffer_stages = 0;
-	uint32_t cbuffer_size = 0;
-	uint32_t pconst_stages = 0;
-	uint32_t pconst_size = 0;
+	u32 cbuffer_stages = 0;
+	u32 cbuffer_size = 0;
+	u32 pconst_stages = 0;
+	u32 pconst_size = 0;
 
 	std::array<ComPtr<slang::IEntryPoint>, 3> stage_eps;
 	std::array<ComPtr<slang::IComponentType>, 3> stage_pgms;
 	std::array<ComPtr<slang::IBlob>, 3> stage_code;
 	std::array<slang::IMetadata*, 3> stage_meta;
-	std::array<uint32_t, 3> ep_types;
-	uint32_t ep_count = 0;
+	std::array<u32, 3> ep_types;
+	u32 ep_count = 0;
 };
 
-void reflect_parameter(uint32_t space, size_t offset, slang::VariableLayoutReflection* param, slang::BindingType btype, CompileContext& ctx)
+void reflect_parameter(u32 space, size_t offset, slang::VariableLayoutReflection* param, slang::BindingType btype, CompileContext& ctx)
 {
 	auto ptype = param->getTypeLayout();
        	switch(ptype->getKind())
@@ -44,7 +50,7 @@ void reflect_parameter(uint32_t space, size_t offset, slang::VariableLayoutRefle
 	std::print(" stages");
 
 	auto pc = static_cast<SlangParameterCategory>(param->getCategoryByIndex(0));
-	for(uint32_t i = 0; i < ctx.ep_count; i++)
+	for(u32 i = 0; i < ctx.ep_count; i++)
 	{
 		bool is_used = false;
 		ctx.stage_meta[i]->isParameterLocationUsed(pc, space, offset, is_used);
@@ -53,17 +59,17 @@ void reflect_parameter(uint32_t space, size_t offset, slang::VariableLayoutRefle
 			if(ctx.ep_types[i] == 0)
 			{
 				std::print(" VS");
-				ctx.cbuffer_stages |= penumbra::SHADER_STAGE_VERTEX;
+				ctx.cbuffer_stages |= penumbra::GPU_STAGE_VERTEX_SHADER;
 			}
 			else if(ctx.ep_types[i] == 1)
 			{
 				std::print(" FS");
-				ctx.cbuffer_stages |= penumbra::SHADER_STAGE_FRAGMENT;
+				ctx.cbuffer_stages |= penumbra::GPU_STAGE_FRAGMENT_SHADER;
 			}
 			else if(ctx.ep_types[i] == 2)
 			{
 				std::print(" CS");
-				ctx.cbuffer_stages |= penumbra::SHADER_STAGE_COMPUTE;
+				ctx.cbuffer_stages |= penumbra::GPU_STAGE_COMPUTE;
 			}
 		}
 	}	
@@ -141,7 +147,7 @@ int main(int argc, const char** argv)
 
 	CompileContext ctx;
 
-	auto check_stage = [slang_module, &session, &ctx](const char* entry, uint32_t eptype) -> bool
+	auto check_stage = [slang_module, &session, &ctx](const char* entry, u32 eptype) -> bool
 	{
 		slang_module->findEntryPointByName(entry, ctx.stage_eps[ctx.ep_count].writeRef());
 		if(!ctx.stage_eps[ctx.ep_count])
@@ -183,7 +189,7 @@ int main(int argc, const char** argv)
 	
 	slang::ProgramLayout* pgm_layout = ctx.stage_pgms[0]->getLayout();
 	std::println("pgm has {} parameters", pgm_layout->getParameterCount());
-	for(uint32_t i = 0; i < pgm_layout->getParameterCount(); i++)
+	for(u32 i = 0; i < pgm_layout->getParameterCount(); i++)
 	{
 		auto param = pgm_layout->getParameterByIndex(i);
 		if(param->getCategoryCount() == 0)
@@ -201,7 +207,7 @@ int main(int argc, const char** argv)
 				auto elem_typelayout = rs_typelayout->getElementTypeLayout();
 				if(elem_typelayout->getKind() == slang::TypeReflection::Kind::Struct)
 				{
-					for(uint32_t field = 0; field < elem_typelayout->getFieldCount(); field++)
+					for(u32 field = 0; field < elem_typelayout->getFieldCount(); field++)
 					{
 						auto field_varlayout = elem_typelayout->getFieldByIndex(field);
 						auto category = static_cast<SlangParameterCategory>(field_varlayout->getCategoryByIndex(0));
@@ -245,24 +251,24 @@ int main(int argc, const char** argv)
 			if(size > 64)
 				std::println("PushConstant larger than 64 bytes");
 
-			ctx.pconst_size = std::max(ctx.pconst_size, static_cast<uint32_t>(size));
-			for(uint32_t ep = 0; ep < ctx.ep_count; ep++)
+			ctx.pconst_size = std::max(ctx.pconst_size, static_cast<u32>(size));
+			for(u32 ep = 0; ep < ctx.ep_count; ep++)
 			{
 				if(ctx.ep_types[ep] == 0)
-					ctx.pconst_stages |= penumbra::SHADER_STAGE_VERTEX;
+					ctx.pconst_stages |= penumbra::GPU_STAGE_VERTEX_SHADER;
 				else if(ctx.ep_types[ep] == 1)
-					ctx.pconst_stages |= penumbra::SHADER_STAGE_FRAGMENT;
+					ctx.pconst_stages |= penumbra::GPU_STAGE_FRAGMENT_SHADER;
 				else if(ctx.ep_types[ep] == 2)
-					ctx.pconst_stages |= penumbra::SHADER_STAGE_COMPUTE;
+					ctx.pconst_stages |= penumbra::GPU_STAGE_COMPUTE;
 			}
 		}
 	}
 
-	for(uint32_t ep = 0; ep < ctx.ep_count; ep++)
+	for(u32 ep = 0; ep < ctx.ep_count; ep++)
 	{
 		slang::EntryPointReflection* ep_layout = ctx.stage_pgms[ep]->getLayout()->getEntryPointByIndex(0);
-		uint32_t accum_pcb_size = 0;
-		for(uint32_t i = 0; i < ep_layout->getParameterCount(); i++)
+		u32 accum_pcb_size = 0;
+		for(u32 i = 0; i < ep_layout->getParameterCount(); i++)
 		{
 			auto param = ep_layout->getParameterByIndex(i);
 			if(param->getCategoryCount() == 0)
@@ -273,7 +279,7 @@ int main(int argc, const char** argv)
 			{
 				auto ptype = param->getTypeLayout();
 				std::println("entrypoint {} param {} - {} is PushConstant<{}> size {}", ep, i, param->getName(), ptype->getType()->getName(), ptype->getSize(category));
-				accum_pcb_size += static_cast<uint32_t>(ptype->getSize(category));
+				accum_pcb_size += static_cast<u32>(ptype->getSize(category));
 
 			}	
 		}	
@@ -287,17 +293,17 @@ int main(int argc, const char** argv)
 			if(ctx.ep_types[ep] == 0)
 			{
 				std::print(" VS");
-				ctx.pconst_stages |= penumbra::SHADER_STAGE_VERTEX;
+				ctx.pconst_stages |= penumbra::GPU_STAGE_VERTEX_SHADER;
 			}
 			else if(ctx.ep_types[ep] == 1)
 			{
 				std::print(" FS");
-				ctx.pconst_stages |= penumbra::SHADER_STAGE_FRAGMENT;
+				ctx.pconst_stages |= penumbra::GPU_STAGE_FRAGMENT_SHADER;
 			}
 			else if(ctx.ep_types[ep] == 2)
 			{
 				std::print(" CS");
-				ctx.pconst_stages |= penumbra::SHADER_STAGE_COMPUTE;
+				ctx.pconst_stages |= penumbra::GPU_STAGE_COMPUTE;
 			}
 		}
 	}
@@ -306,7 +312,7 @@ int main(int argc, const char** argv)
 	using namespace penumbra;
 
 	std::ofstream out{argv[2], std::ios::binary};
-	std::array<uint32_t, 5> code_offsets;
+	std::array<u32, 5> code_offsets;
 
 	ShaderFileFormat::Header header;
 	header.cbuffer_stages = ctx.cbuffer_stages;
@@ -314,29 +320,29 @@ int main(int argc, const char** argv)
 	header.pcb_size = ctx.pconst_size;
 	header.pcb_stages = ctx.pconst_stages;
 	header.num_stages = ctx.ep_count;
-	out.seekp(sizeof(ShaderFileFormat::Header) + sizeof(ShaderFileFormat::ShaderStage) * ctx.ep_count);
+	out.seekp(sizeof(ShaderFileFormat::Header) + sizeof(ShaderFileFormat::Stage) * ctx.ep_count);
 	
-	for(uint32_t i = 0; i < ctx.ep_count; i++)
+	for(u32 i = 0; i < ctx.ep_count; i++)
 	{
-		code_offsets[i] = static_cast<uint32_t>(out.tellp());
+		code_offsets[i] = static_cast<u32>(out.tellp());
 		out.write(reinterpret_cast<const char*>(ctx.stage_code[i]->getBufferPointer()), ctx.stage_code[i]->getBufferSize());
 	}
 
 	out.seekp(sizeof(ShaderFileFormat::Header));
-	for(uint32_t i = 0; i < ctx.ep_count; i++)
+	for(u32 i = 0; i < ctx.ep_count; i++)
 	{
-		ShaderFileFormat::ShaderStage stg;
+		ShaderFileFormat::Stage stg;
 		if(ctx.ep_types[i] == 0)
-			stg.stage = SHADER_STAGE_VERTEX;
+			stg.stage = GPU_STAGE_VERTEX_SHADER;
 		else if(ctx.ep_types[i] == 1)
-			stg.stage = SHADER_STAGE_FRAGMENT;
+			stg.stage = GPU_STAGE_FRAGMENT_SHADER;
 		else if(ctx.ep_types[i] == 2)
-			stg.stage = SHADER_STAGE_COMPUTE;
+			stg.stage = GPU_STAGE_COMPUTE;
 
 		stg.code_size = ctx.stage_code[i]->getBufferSize();
 		stg.code_offset = code_offsets[i];
 
-		out.write(reinterpret_cast<const char*>(&stg), sizeof(ShaderFileFormat::ShaderStage));
+		out.write(reinterpret_cast<const char*>(&stg), sizeof(ShaderFileFormat::Stage));
 	}
 	out.seekp(0);
 	out.write(reinterpret_cast<const char*>(&header), sizeof(ShaderFileFormat::Header));

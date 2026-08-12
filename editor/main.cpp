@@ -1,40 +1,58 @@
+#include <penumbra/penumbra.hpp>
+
+#include <core.hpp>
+#include <world/state.hpp>
+
 #include <tracy/Tracy.hpp>
 
-import penumbra.core;
-import penumbra.gpu;
-import penumbra.renderer;
-import penumbra.resource;
-import penumbra.ui;
-import penumbra.physics;
-import std;
-
-import penumbra.editor;
+#include <chrono>
+#include <cmath>
 
 using namespace penumbra;
+
+static cvar_t fps_limit
+{
+	.name = "fps_max",
+	.type = CVAR_TYPE_INT,
+	.int_defv = 120,
+	.int_v = 120
+};
+
+static cvar_t tickrate
+{
+	.name = "sv_tickrate",
+	.type = CVAR_TYPE_INT,
+	.int_defv = 60,
+	.int_v = 60
+};
 
 int main(int argc, const char** argv)
 {
 	log_init();
 	log::info("penumbra git-{}", config::git_hash);
+
+	cvar_register(&fps_limit);
+	cvar_register(&tickrate);
+
 	vfs_init();
 	wm_init();
-
-	{
+	input_init();
 
 	auto window = wm_create_window("penumbra_editor", {1280, 720});
 
 	renderer_init(window);
 	resource_manager_init();
-	physics_init_rigidbody_storage();
+
+	physics_create_world({});
 
 	auto start = std::chrono::steady_clock::now();
 	auto world_state = std::make_unique<WorldState>();
 	auto editor = std::make_unique<Editor>(window, world_state.get(), argc, argv);
 
 	std::chrono::steady_clock::duration accumulator{0};
-	std::chrono::microseconds fixed_timestep{int(1.0 / 60.0 * 1e6)};
+	std::chrono::microseconds fixed_timestep{int(1.0 / double(tickrate.int_v) * 1e6)};
 
-	while(!window.requested_close())
+	while(!wm_requested_close())
 	{
 		ZoneScopedN("Main Loop");
 		
@@ -44,12 +62,14 @@ int main(int argc, const char** argv)
 		accumulator += frame_time;
 
 		renderer_next_frame();
-		window.poll_events();
-		
+		wm_poll_events();
+		input_poll();
+
 		while(accumulator >= fixed_timestep)
 		{
 			ZoneScopedN("Fixed Update");
 			editor->fixed_update(double(fixed_timestep.count()) / 1e6);
+			physics_world_simulate(double(fixed_timestep.count()) / 1e6, 4);
 			accumulator -= fixed_timestep;
 		}
 		
@@ -59,7 +79,7 @@ int main(int argc, const char** argv)
 		}
 		renderer_process_frame(double(frame_time.count()) / 1e9);
 
-		std::chrono::nanoseconds vrr_timestep{int(1.0 / double(120.0) * 1e9)};
+		std::chrono::nanoseconds vrr_timestep{int(1.0 / double(fps_limit.int_v) * 1e9)};
 		auto ft = std::chrono::steady_clock::now() - start;
 		auto sleep_time = vrr_timestep - ft;
 		if(vrr_timestep > ft)
@@ -99,12 +119,13 @@ int main(int argc, const char** argv)
 	gpu_wait_idle();
 	editor.reset();
 
-	physics_shutdown_rigidbody_storage();
+	physics_destroy_world();
 	resource_manager_shutdown();
 	renderer_shutdown();
-
-	}
 	
+	wm_destroy_window(window);
+
+	input_shutdown();
 	wm_shutdown();
 	vfs_shutdown();
 }
