@@ -16,7 +16,7 @@ enum resource_type : u8
 using ResourceID = u32;
 constexpr ResourceID resource_id_new(resource_type type, u32 handle)
 {
-	return std::to_underlying(type) << 24 | handle & 0xFFFFFF;
+	return std::to_underlying(type) << 24 | (handle & 0xFFFFFF);
 }
 
 constexpr resource_type resource_get_type(ResourceID res)

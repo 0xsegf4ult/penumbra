@@ -4,6 +4,7 @@
 #include <penumbra/log.hpp>
 #include <penumbra/panic.hpp>
 
+#include <cstring>
 #include <format>
 #include <vector>
 

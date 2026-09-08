@@ -5,6 +5,7 @@
 #include <penumbra/ecs.hpp>
 #include <penumbra/log.hpp>
 #include <penumbra/resource.hpp>
+#include <penumbra/renderer.hpp>
 #include <penumbra/vfs.hpp>
 #include <penumbra/types.hpp>
 
@@ -126,16 +127,6 @@ void load_prefab(WorldState& world, const vfs_path& path)
 					skeleton = resource_manager_load_skeleton(vfs_path{"anim"} / read_string_table(skc->skeleton));
 				}
 
-				u32 shadow_levels = 3;
-				if(smc->flags & PREFAB_MESH_NO_SHADOWCAST_C3)
-					shadow_levels = 3;
-				if(smc->flags & PREFAB_MESH_NO_SHADOWCAST_C2)
-					shadow_levels = 2;
-				if(smc->flags & PREFAB_MESH_NO_SHADOWCAST_C1)
-					shadow_levels = 1;
-				if(smc->flags & PREFAB_MESH_NO_SHADOWCAST)
-					shadow_levels = 0;
-
 				auto& geom_data = resource_manager_get_geometry(geom);
 				assert(geom_data.skinned_vertex == is_skinned_cmp);
 				
@@ -145,7 +136,7 @@ void load_prefab(WorldState& world, const vfs_path& path)
 					geom,
 					material,
 					skeleton
-				}, shadow_levels);
+				});
 
 				graph.emplace<render_object_component>(node_ent, geom, material, rd_object);
 				if(is_skinned_cmp && resource_get_handle(skeleton))

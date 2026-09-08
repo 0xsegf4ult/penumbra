@@ -6,8 +6,8 @@ ConstantBuffer<VisbufferConstants> consts;
 
 struct VSInput
 {
-	Ptr<ObjectData, Access.Read> objects;
-	Ptr<ClusterInstance, Access.Read> instances;
+	Ptr<GPUWorldRenderable, Access.Read> renderables;
+	Ptr<GPUWorldMeshletInstance, Access.Read> instances;
 };
 
 struct VSOutput
@@ -22,7 +22,7 @@ VSOutput vertexMain(uniform VSInput input, uint index : SV_VulkanVertexID, uint 
 	VSOutput output;
 	output.drawID = instance;
 
-	float4x4 trs = input.objects[input.instances[instance].object - 1].transform;
+	float4x4 trs = input.renderables[input.instances[instance].renderable_index].transform;
 	float4 outWorldPos = mul(float4(consts.vertex_pos[index], 1.0), trs);
 	output.pos = mul(outWorldPos, consts.camera);
 	return output;

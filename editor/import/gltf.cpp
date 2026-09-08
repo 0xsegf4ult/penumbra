@@ -359,7 +359,7 @@ static void parse_gltf_mesh(gltf_import_context& ctx, fastgltf::Asset& gltf, siz
 			primitives[0].geometry,
 		 	primitives[0].material,
 			skeleton,
-		}, 3);
+		});
 		
 		if(resource_get_handle(skeleton))
 			ctx.world->entities.emplace<render_skeleton_component>(parent, skeleton);
@@ -384,7 +384,7 @@ static void parse_gltf_mesh(gltf_import_context& ctx, fastgltf::Asset& gltf, siz
 			primitives[i].geometry,
 		 	primitives[i].material,
 			skeleton
-		}, 3);
+		});
 
 		if(resource_get_handle(skeleton))
 			ctx.world->entities.emplace<render_skeleton_component>(p_ent, skeleton);

@@ -4,7 +4,8 @@
 
 struct VSInput
 {
-	Ptr<ObjectData, Access.Read> objects;
+	Ptr<GPUWorldRenderable, Access.Read> renderables;
+	Ptr<GPUWorldMeshletInstance, Access.Read> instances;
 	Ptr<MaterialPBR, Access.Read> materials;
 	Ptr<float3, Access.Read> vertex_pos;
 	Ptr<float2, Access.Read> vertex_uv;
@@ -24,9 +25,9 @@ VSOutput vertexMain(uniform VSInput input, uint index : SV_VulkanVertexID, uint 
 {
 	VSOutput output;
 	output.uv = input.vertex_uv[index];
-	output.material = input.objects[instance].material_offset;
+	output.material = input.renderables[input.instances[instance].renderable_index].material_offset;
 
-	float4x4 trs = input.objects[instance].transform;
+	float4x4 trs = input.renderables[input.instances[instance].renderable_index].transform;
 	float4 outWorldPos = mul(float4(input.vertex_pos[index], 1.0), trs);
 	output.pos = mul(outWorldPos, input.smap_data[input.smap_index]);
 	return output;

@@ -8,8 +8,8 @@ ConstantBuffer<VisbufferConstants> consts;
 
 struct PSOInput
 {
-	Ptr<ObjectData, Access.Read> objects;
-	Ptr<ClusterInstance, Access.Read> instances;
+	Ptr<GPUWorldRenderable, Access.Read> renderables;
+	Ptr<GPUWorldMeshletInstance, Access.Read> instances;
 	Ptr<MaterialPBR, Access.Read> materials;
 };
 
@@ -28,10 +28,10 @@ VSOutput vertexMain(uniform PSOInput input, uint index : SV_VulkanVertexID, uint
 {
 	VSOutput output;
 	output.uv = consts.vertex_uv[index];
-	output.material = input.objects[input.instances[instance].object - 1].material_offset;
+	output.material = input.renderables[input.instances[instance].renderable_index].material_offset;
 	output.drawID = instance;
 
-	float4x4 trs = input.objects[input.instances[instance].object - 1].transform;
+	float4x4 trs = input.renderables[input.instances[instance].renderable_index].transform;
 	
 	float3x3 trs_invT = float3x3(
 		cross(trs[1].xyz, trs[2].xyz),

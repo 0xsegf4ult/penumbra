@@ -3,7 +3,7 @@
 
 struct CSInput
 {
-	Ptr<ClusterInstance, Access.Read> instances;
+	Ptr<GPUWorldMeshletInstance, Access.Read> instances;
 	Ptr<uint, Access.ReadWrite> output;
 	uint2 coords;
 	ResourceHandle<Texture2D<uint>> visbuffer;
@@ -20,5 +20,5 @@ void computeMain(uniform CSInput data)
 	uint meshletID = (primitiveID >> 7) - 1;
 	
 	if(meshletID < 65536)	
-		*(data.output) = data.instances[meshletID].object;
+		*(data.output) = data.instances[meshletID].renderable_index;
 }	

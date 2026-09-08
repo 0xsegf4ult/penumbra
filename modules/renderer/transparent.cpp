@@ -59,12 +59,12 @@ void renderer_transparent_draw(visibility_buffer& visbuffer, GPUCommandBuffer& c
 	gpu_write_cbuffer_descriptor(cmd, visbuffer.cbuffer[renderer_gfx_frame_index()]);
 	gpu_bind_index_buffer(cmd, renderer_geometry_get_storage().index, GPU_INDEX_TYPE_U8);
 
-	auto drawcall = renderer_world_get_drawcall(RENDER_VIEW_DEFAULT, RENDER_BUCKET_TRANSPARENT);
+	auto drawcall = renderer_world_get_mdi_drawcall(RENDER_VIEW_DEFAULT, RENDER_BUCKET_TRANSPARENT);
 	shader_data.instances = gpu_host_to_device_pointer(drawcall.instances);
 	gpu_draw_indexed_indirect_count(cmd, &shader_data, drawcall.commands, drawcall.counter, drawcall.max_instance_count);
 
 	gpu_set_cullmode(cmd, GPU_CULLMODE_NONE);
-	drawcall = renderer_world_get_drawcall(RENDER_VIEW_DEFAULT, RENDER_BUCKET_TRANSPARENT_DOUBLE_SIDED);
+	drawcall = renderer_world_get_mdi_drawcall(RENDER_VIEW_DEFAULT, RENDER_BUCKET_TRANSPARENT_DOUBLE_SIDED);
 	gpu_draw_indexed_indirect_count(cmd, &shader_data, drawcall.commands, drawcall.counter, drawcall.max_instance_count);
 }
 

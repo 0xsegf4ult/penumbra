@@ -124,26 +124,26 @@ void renderer_visbuffer_build(visibility_buffer& visbuffer, GPUCommandBuffer& cm
 	gpu_write_cbuffer_descriptor(cmd, visbuffer.cbuffer[renderer_gfx_frame_index()]);
 
 	gpu_bind_index_buffer(cmd, geometry_storage.index, GPU_INDEX_TYPE_U8);
-	auto drawcall = renderer_world_get_drawcall(RENDER_VIEW_DEFAULT, RENDER_BUCKET_DEFAULT);
+	auto drawcall = renderer_world_get_mdi_drawcall(RENDER_VIEW_DEFAULT, RENDER_BUCKET_DEFAULT);
 	shader_data.instances = gpu_host_to_device_pointer(drawcall.instances);
 	gpu_draw_indexed_indirect_count(cmd, &shader_data, drawcall.commands, drawcall.counter, drawcall.max_instance_count);
 
 	gpu_set_cullmode(cmd, GPU_CULLMODE_NONE);
-	drawcall = renderer_world_get_drawcall(RENDER_VIEW_DEFAULT, RENDER_BUCKET_DOUBLE_SIDED);
+	drawcall = renderer_world_get_mdi_drawcall(RENDER_VIEW_DEFAULT, RENDER_BUCKET_DOUBLE_SIDED);
 	gpu_draw_indexed_indirect_count(cmd, &shader_data, drawcall.commands, drawcall.counter, drawcall.max_instance_count);
 
 	gpu_set_pipeline(cmd, visbuffer_build_alphamask_pso);
 	gpu_set_depth_stencil_state(cmd, vb_ds_reverse_z);
 	gpu_write_cbuffer_descriptor(cmd, visbuffer.cbuffer[renderer_gfx_frame_index()]);
 
-	drawcall = renderer_world_get_drawcall(RENDER_VIEW_DEFAULT, RENDER_BUCKET_ALPHA_MASKED_DOUBLE_SIDED);
+	drawcall = renderer_world_get_mdi_drawcall(RENDER_VIEW_DEFAULT, RENDER_BUCKET_ALPHA_MASKED_DOUBLE_SIDED);
 	am_shader_data.instances = gpu_host_to_device_pointer(drawcall.instances);
 	gpu_draw_indexed_indirect_count(cmd, &am_shader_data, drawcall.commands, drawcall.counter, drawcall.max_instance_count);
 
 	gpu_set_cullmode(cmd, GPU_CULLMODE_CW);
-	drawcall = renderer_world_get_drawcall(RENDER_VIEW_DEFAULT, RENDER_BUCKET_ALPHA_MASKED);
+	drawcall = renderer_world_get_mdi_drawcall(RENDER_VIEW_DEFAULT, RENDER_BUCKET_ALPHA_MASKED);
 	gpu_draw_indexed_indirect_count(cmd, &am_shader_data, drawcall.commands, drawcall.counter, drawcall.max_instance_count);
-	
+
 	gpu_end_renderpass(cmd);
 }
 

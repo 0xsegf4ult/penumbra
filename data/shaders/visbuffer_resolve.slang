@@ -9,8 +9,8 @@ ConstantBuffer<VisbufferConstants> consts;
 
 struct CSInput
 {
-	Ptr<ClusterInstance, Access.Read> instances;
-	Ptr<ObjectData, Access.Read> objects;
+	Ptr<GPUWorldMeshletInstance, Access.Read> instances;
+	Ptr<GPUWorldRenderable, Access.Read> renderables;
 	Ptr<MaterialPBR, Access.Read> materials;
 	Ptr<GeometryCluster, Access.Read> clusters;
 	ResourceHandle<Texture2D<uint>> visbuffer;
@@ -233,14 +233,14 @@ void computeMain(uint groupIndex : SV_GroupIndex, uint2 Gid : SV_GroupID, unifor
 	uint triangleID = primitiveID & 0x7F;
 	uint meshletID = (primitiveID >> 7) - 1;
 
-	uint instance = input.instances[meshletID].object - 1;
-	Ptr<ObjectData, Access.Read> object = input.objects + instance;
-	float4x4 trs = object->transform;
-	material = object->material_offset;
-	GeometryCluster cluster = input.clusters[input.instances[meshletID].cluster];
-	uint i0 = uint(consts.ibuf[cluster.index_offset + object->geom_idx_offset + (3 * triangleID) + 0]) + cluster.vertex_offset + object->geom_vtx_offset;
-	uint i1 = uint(consts.ibuf[cluster.index_offset + object->geom_idx_offset + (3 * triangleID) + 1]) + cluster.vertex_offset + object->geom_vtx_offset;
-	uint i2 = uint(consts.ibuf[cluster.index_offset + object->geom_idx_offset + (3 * triangleID) + 2]) + cluster.vertex_offset + object->geom_vtx_offset;
+	uint instance = input.instances[meshletID].renderable_index;
+	Ptr<GPUWorldRenderable, Access.Read> renderable = input.renderables + instance;
+	float4x4 trs = renderable->transform;
+	material = renderable->material_offset;
+	GeometryCluster cluster = input.clusters[input.instances[meshletID].meshlet_index];
+	uint i0 = uint(consts.ibuf[cluster.index_offset + renderable->geom_idx_offset + (3 * triangleID) + 0]) + cluster.vertex_offset + renderable->geom_vtx_offset;
+	uint i1 = uint(consts.ibuf[cluster.index_offset + renderable->geom_idx_offset + (3 * triangleID) + 1]) + cluster.vertex_offset + renderable->geom_vtx_offset;
+	uint i2 = uint(consts.ibuf[cluster.index_offset + renderable->geom_idx_offset + (3 * triangleID) + 2]) + cluster.vertex_offset + renderable->geom_vtx_offset;
 
 	p0 = mul(float4(consts.vertex_pos[i0], 1.0), trs).xyz;
 	p1 = mul(float4(consts.vertex_pos[i1], 1.0), trs).xyz;

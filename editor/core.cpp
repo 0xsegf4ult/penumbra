@@ -22,6 +22,8 @@
 #include <penumbra/window.hpp>
 #include <penumbra/ui.hpp>
 
+#include <tracy/Tracy.hpp>
+
 #include <memory>
 
 namespace penumbra
@@ -47,7 +49,6 @@ Editor::Editor(window_t wnd, WorldState* ws, int argc, const char** argv) : wind
 	qmap_import_context import_ctx{world};
 	import_qmap(import_ctx, def_prefab);*/
 	load_prefab(*world, def_prefab);
-	try_patch_prefab(def_prefab.string());
 }
 
 Editor::~Editor()
@@ -57,10 +58,14 @@ Editor::~Editor()
 
 void Editor::fixed_update(double dt)
 {
+	ZoneScoped;
+
 }
 
 void Editor::variable_update(double dt)
 {
+	ZoneScoped;
+
 	auto vp_size = widget_viewport->get_size();
 	if(vp_size.x && vp_size.y)
 	{
@@ -167,6 +172,8 @@ void Editor::variable_update(double dt)
 
 void Editor::draw_ui()
 {
+	ZoneScoped;
+
 	auto window_flags =
 		ImGuiWindowFlags_MenuBar		|
 		ImGuiWindowFlags_NoDocking		|
@@ -349,6 +356,8 @@ void Editor::create_rendertarget()
 
 void Editor::update_main_camera()
 {
+	ZoneScoped;
+
 	auto& camera_transform = world->entities.get<Transform>(world->main_camera);
 	auto& camera = world->entities.get<camera_component>(world->main_camera);
 	auto res = renderer_get_render_resolution();
@@ -391,90 +400,6 @@ void Editor::update_env()
 		1200.0f,
 		world->r_envmap
 	});
-}
-
-void Editor::try_patch_prefab(std::string_view name)
-{
-	if(name == "qmv_arena")
-	{
-		ecs::entity floor_ent;
-		for(auto&& [entity, name] : world->entities.view<entity_name>().each())
-		{
-			if(name == "qmv_floor")
-			{
-				floor_ent = entity;
-				break;
-			}
-		}
-
-		auto floor_xform = world->entities.get<Transform>(floor_ent);
-
-		physicsBodyDesc floor_desc
-		{
-			.initial_transform = floor_xform,
-			.body_type = PHYSICS_BODY_STATIC
-		};
-
-		static physicsBoxHull floor_hull;
-		floor_hull = physics_make_box_hull(vec3{25.0f, 0.05f, 25.0f});
-
-		auto floor_rb = physics_create_body(floor_desc);
-		auto floor_shape = physics_create_hull(floor_rb, {}, floor_hull.hull);
-		world->entities.emplace<rigidbody_component>(floor_ent, floor_desc, floor_rb);
-		world->entities.emplace<box_collider_component>(floor_ent, vec3{25.0f, 0.05f, 25.0f});
-
-		auto test_entity = world->spawn("test_entity");
-		add_entity_as_child(world->entities, world->root, test_entity);
-		Transform te_xf{vec3{0.0f, 5.5f, 0.0f}, Quaternion{}, vec3{1.0f}};
-		world->entities.emplace_or_replace<Transform>(test_entity, te_xf);
-
-		ResourceID def_mat = resource_id_new(RESOURCE_TYPE_MATERIAL, 0);
-		auto capsule = resource_manager_load_geometry("meshes/capsule");
-
-		auto rd_object = renderer_world_insert_object
-		({
-			te_xf.as_matrix(),
-			capsule,
-			def_mat
-		}, 3);
-		world->entities.emplace<render_object_component>(test_entity, capsule, def_mat, rd_object);
-		physicsBodyDesc te_rb_desc
-		{
-			.initial_transform = te_xf
-		};
-
-		auto caps_rb = physics_create_body(te_rb_desc);
-		auto caps_shape = physics_create_capsule(caps_rb, {}, {.radius = 0.5f, .height = 1.0f});
-		world->entities.emplace<rigidbody_component>(test_entity, te_rb_desc, caps_rb);
-		world->entities.emplace<capsule_collider_component>(test_entity, physicsCapsule{.radius = 0.5f, .height = 1.0f});
-
-		auto box = world->spawn("box");
-		add_entity_as_child(world->entities, world->root, box);
-		Transform bo_xf{vec3{0.0f, 1.5f, 0.0f}, Quaternion{}, vec3{1.0f}};
-		world->entities.emplace_or_replace<Transform>(box, bo_xf);
-
-		auto boxg = resource_manager_load_geometry("meshes/unit_cube");
-		auto b_rd_object = renderer_world_insert_object
-		({
-			bo_xf.as_matrix(),
-			boxg,
-			def_mat
-		}, 3);
-		world->entities.emplace<render_object_component>(box, boxg, def_mat, b_rd_object);
-
-		physicsBodyDesc box_rb_desc
-		{
-			.initial_transform = bo_xf
-		};
-
-		auto box_rb = physics_create_body(box_rb_desc);
-		
-		static physicsBoxHull box_hull;
-		box_hull = physics_make_box_hull(vec3{0.5f, 0.5f, 0.5f});
-		auto box_shape = physics_create_hull(box_rb, {}, box_hull.hull);
-		world->entities.emplace<rigidbody_component>(box, box_rb_desc, box_rb);
-		world->entities.emplace<box_collider_component>(box, vec3{0.5f, 0.5f, 0.5f});
-	}
 }
 
 }

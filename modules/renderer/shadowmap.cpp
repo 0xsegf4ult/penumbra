@@ -9,7 +9,10 @@
 #include <penumbra/log.hpp>
 #include <penumbra/types.hpp>
 #include <penumbra/cvar.hpp>
+#include <cstring>
 #include <vector>
+
+#include <tracy/Tracy.hpp>
 
 namespace penumbra
 {
@@ -131,6 +134,8 @@ void renderer_shadow_cleanup(render_shadow_data& data)
 
 void renderer_shadow_update(render_shadow_data& data, const render_camera_data& main_camera, vec3 light_dir)
 {
+	ZoneScoped;
+
 	data.csm_lambda = std::max(0.0f, cvar_csm_lambda.float_v);
 	data.csm_cbias = std::max(0.0f, cvar_cbias.float_v);
 	data.csm_nbias = std::max(0.0f, cvar_nbias.float_v);
@@ -257,6 +262,7 @@ void renderer_shadow_build(render_shadow_data& data, GPUCommandBuffer& cmd)
 	struct ShaderData
 	{
 		GPUDevicePointer objects;
+		GPUDevicePointer instances;
 		GPUDevicePointer vertex_pos;
 		GPUDevicePointer smap_data;
 		u32 smap_index;
@@ -268,6 +274,7 @@ void renderer_shadow_build(render_shadow_data& data, GPUCommandBuffer& cmd)
 	struct AMShaderData
 	{
 		GPUDevicePointer objects;
+		GPUDevicePointer instances;
 		GPUDevicePointer materials;
 		GPUDevicePointer vertex_pos;
 		GPUDevicePointer vertex_uv;
@@ -301,23 +308,25 @@ void renderer_shadow_build(render_shadow_data& data, GPUCommandBuffer& cmd)
 		gpu_set_pipeline(cmd, shadowmap_opaque_pso);
 		gpu_set_depth_stencil_state(cmd, shadow_ds);
 		
-		auto drawcall = renderer_world_get_drawcall(cascade.render_view, RENDER_BUCKET_DOUBLE_SIDED);
+		auto drawcall = renderer_world_get_mdi_drawcall(cascade.render_view, RENDER_BUCKET_DOUBLE_SIDED);
+		shader_data.instances = gpu_host_to_device_pointer(drawcall.instances);
 		gpu_draw_indexed_indirect_count(cmd, &shader_data, drawcall.commands, drawcall.counter, drawcall.max_instance_count);
-
+		
 		gpu_set_cullmode(cmd, GPU_CULLMODE_CW);
-		drawcall = renderer_world_get_drawcall(cascade.render_view, RENDER_BUCKET_DEFAULT);
+		drawcall = renderer_world_get_mdi_drawcall(cascade.render_view, RENDER_BUCKET_DEFAULT);
 		gpu_draw_indexed_indirect_count(cmd, &shader_data, drawcall.commands, drawcall.counter, drawcall.max_instance_count);
 
 		am_shader_data.smap_index = i;
 		gpu_set_pipeline(cmd, shadowmap_alphamask_pso);
 
-		drawcall = renderer_world_get_drawcall(cascade.render_view, RENDER_BUCKET_ALPHA_MASKED);
+		drawcall = renderer_world_get_mdi_drawcall(cascade.render_view, RENDER_BUCKET_ALPHA_MASKED);
+		am_shader_data.instances = gpu_host_to_device_pointer(drawcall.instances);
 		gpu_draw_indexed_indirect_count(cmd, &am_shader_data, drawcall.commands, drawcall.counter, drawcall.max_instance_count);
 
 		gpu_set_cullmode(cmd, GPU_CULLMODE_NONE);
-		drawcall = renderer_world_get_drawcall(cascade.render_view, RENDER_BUCKET_ALPHA_MASKED_DOUBLE_SIDED);
+		drawcall = renderer_world_get_mdi_drawcall(cascade.render_view, RENDER_BUCKET_ALPHA_MASKED_DOUBLE_SIDED);
 		gpu_draw_indexed_indirect_count(cmd, &am_shader_data, drawcall.commands, drawcall.counter, drawcall.max_instance_count);
-
+		
 		gpu_end_renderpass(cmd);
 	}
 }

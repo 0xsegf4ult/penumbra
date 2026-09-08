@@ -287,6 +287,8 @@ void renderer_next_frame()
 
 static void renderer_prepare_visbuffer()
 {
+	ZoneScoped;
+
 	vec2 f_res{static_cast<float>(renderer->render_resolution.x), static_cast<float>(renderer->render_resolution.y)};
 
 	auto* vbconst = reinterpret_cast<visbuffer_cbuffer*>(gpu_map_memory(renderer->visbuffer.cbuffer[renderer->frame_index]));
@@ -482,6 +484,8 @@ void renderer_set_output_rendertarget(GPUTexture rt)
 
 void renderer_update_camera(const render_camera_data& data)
 {
+	ZoneScoped;
+
 	auto* vbconst = reinterpret_cast<visbuffer_cbuffer*>(gpu_map_memory(renderer->visbuffer.cbuffer[renderer->frame_index]));
 	vbconst->camera = data.view * data.proj;
 	vbconst->view = data.view;
@@ -501,19 +505,6 @@ void renderer_update_camera(const render_camera_data& data)
 void renderer_update_environment(const render_environment_data& data)
 {
 	renderer->env = data;
-}
-
-renderObjectID renderer_world_insert_object(const render_object_desc& desc, u32 shadow_level)
-{
-	std::array<renderViewID, 4> views
-	{
-		RENDER_VIEW_DEFAULT,
-		renderer->shadow_data.cascades[0].render_view,
-		renderer->shadow_data.cascades[1].render_view,
-		renderer->shadow_data.cascades[2].render_view,
-	};
-
-	return renderer_world_insert_object_internal(desc, {views.data(), shadow_level + 1u});
 }
 
 void renderer_hook_visbuffer(const visbuffer_hook& hook)

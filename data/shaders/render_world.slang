@@ -1,6 +1,12 @@
 #pragma once
 
-struct ObjectData
+[Flags]
+enum ObjectFlags : uint
+{
+	Disabled
+};
+
+struct GPUWorldRenderable
 {
 	float4x4 transform;
 	float4 sphere;
@@ -31,31 +37,48 @@ struct GeometryCluster
 	float4 cone;
 };
 
-struct ObjectInstance
+struct DrawIndirectCommand
 {
-	uint input_offset;
-	uint output_offset;
+	uint vertex_count;
+	uint instance_count;
+	uint first_vertex;
+	uint first_instance;	
 };
 
-struct ClusterInstance
-{
-	uint object;
-	uint cluster;
-};
-
-struct RenderBucket
-{
-	uint offset;
-	uint count;
-};
-
-struct IndirectCommand
+struct DrawIndexedIndirectCommand
 {
 	uint index_count;
 	uint instance_count;
-	uint index_offset;
-	int vertex_offset;
-	uint instance_id;
+	uint first_index;
+	uint first_vertex;
+	uint first_instance;
+};
+
+struct VisCounters
+{
+	uint renderable_count;
+	uint visible_meshlets;
+	uint threadgroup_count;
+};
+
+struct GPUWorldBucket
+{
+	uint offset;
+	uint counter;
+};
+
+struct GPUWorldMeshlet
+{
+	uint renderable_index;
+	uint bucket;
+	uint lod;
+	uint meshlet_index;
+};
+
+struct GPUWorldMeshletInstance
+{
+	uint renderable_index;
+	uint meshlet_index;
 };
 
 [Flags]

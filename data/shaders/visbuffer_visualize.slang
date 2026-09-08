@@ -3,7 +3,7 @@
 
 struct CSInput
 {
-	Ptr<ClusterInstance, Access.Read> instances;
+	Ptr<GPUWorldMeshletInstance, Access.Read> instances;
 	uint2 res;
 	ResourceHandle<Texture2D<uint>> visbuffer;
 	ResourceHandle<RWTexture2D> framebuffer;
@@ -38,7 +38,7 @@ void computeMain(uint groupIndex : SV_GroupIndex, uint2 Gid : SV_GroupID, unifor
 	}
 
 	uint meshletID = (primitiveID >> 7) - 1;
-	uint cluster = hash(input.instances[meshletID].cluster);
+	uint cluster = hash(input.instances[meshletID].meshlet_index);
 
 	uint b = (cluster >> 16) & 0xFF;
 	uint g = (cluster >> 8) & 0xFF;

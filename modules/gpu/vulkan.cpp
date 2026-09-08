@@ -16,6 +16,7 @@
 #include <array>
 #include <bit>
 #include <cassert>
+#include <cstring>
 #include <format>
 #include <optional>
 #include <queue>
@@ -81,6 +82,8 @@ struct QueueData
 
 	u32 family;
 	std::vector<CommandPool> cmd_pools;
+
+	bool alias{false};
 };
 
 enum ResourceHeapIndex
@@ -149,6 +152,7 @@ struct gpu_context_t
 	VkDevice device;
 
 	std::array<QueueData, 3> queue_data;
+	u32 queue_count{0u};
 
 	std::vector<VkSemaphore> semaphores;
 	std::vector<GPUBuffer> buffers;
@@ -230,8 +234,17 @@ static std::vector<VkDeviceQueueCreateInfo> vulkan_device_create_queues()
 	std::vector<VkDeviceQueueCreateInfo> queue_ci;
 
 	float queue_priority = 1.0f;
+	u32 prev_family = 0xFFFFFFFF;
+	gpu_context->queue_count = 0;
 	for(auto& queue : gpu_context->queue_data)
 	{
+		if(queue.family == prev_family)
+			continue;
+
+		prev_family = queue.family;
+		queue.alias = false;
+		gpu_context->queue_count++;
+
 		VkDeviceQueueCreateInfo ci
 		{
 			.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
@@ -817,8 +830,8 @@ GPUPointer gpu_allocate_memory(size_t size, GPUMemoryHeap heap, GPUBufferUsage u
 		.flags = 0,
 		.size = size,
 		.usage = 0,
-		.sharingMode = VK_SHARING_MODE_CONCURRENT,
-		.queueFamilyIndexCount = static_cast<u32>(indices.size()),
+		.sharingMode = gpu_context->queue_count > 1 ? VK_SHARING_MODE_CONCURRENT : VK_SHARING_MODE_EXCLUSIVE,
+		.queueFamilyIndexCount = gpu_context->queue_count,
 		.pQueueFamilyIndices = indices.data()
 	};
 
@@ -1813,7 +1826,7 @@ void gpu_barrier(const GPUCommandBuffer& cmd, GPUStage src, GPUStage dst, GPUHaz
 	barrier.srcAccessMask = 0;
 	barrier.dstAccessMask = 0;
 
-	if(hazards == GPU_HAZARD_NONE)
+	if(hazards == GPU_HAZARD_NONE || hazards & GPU_HAZARD_MEMORY)
 	{
 		barrier.srcAccessMask = VK_ACCESS_2_MEMORY_WRITE_BIT;
 		barrier.dstAccessMask = VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT;

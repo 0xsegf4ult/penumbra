@@ -8,6 +8,7 @@
 #include <renderer/resource.hpp>
 
 #include <algorithm>
+#include <cstring>
 #include <limits>
 #include <string>
 #include <utility>
