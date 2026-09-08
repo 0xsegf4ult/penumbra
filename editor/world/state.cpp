@@ -107,6 +107,8 @@ void WorldState::set_envmap(const EnvironmentMap& envmap)
 
 void WorldState::update_transforms()
 {
+	ZoneScoped;
+
 	for(auto [entity] : entities.view<transform_dirty_t>().each())
 	{
 		auto wm = get_entity_world_matrix(entities, entity);

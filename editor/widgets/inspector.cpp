@@ -236,11 +236,14 @@ static void inspect_rigidbody(rigidbody_component& rb)
 {
 	if(ImGui::CollapsingHeader("Rigidbody"))
 	{
-		int bt = rb.desc.body_type;
-		int mt = rb.desc.motion_type;
+		int bt = rb.desc.type;
+		int mt = rb.desc.motion;
 
 		ImGui::Combo("Body type", &bt, "Static\0Kinematic\0Dynamic\0\0");
-		ImGui::Combo("Motion type", &mt, "Discrete\0CCD\0\0");	
+		ImGui::Combo("Motion type", &mt, "Discrete\0CCD\0\0");
+
+		rb.desc.type = physicsBodyType{u8(bt)};
+		rb.desc.motion = physicsMotionType{u8(mt)};
 	}
 }
 
@@ -256,7 +259,8 @@ static void inspect_capsule_collider(capsule_collider_component& ccol)
 {
 	if(ImGui::CollapsingHeader("Capsule collider"))
 	{
-		inspect_float("Height", ccol.desc.height);
+		inspect_vec3("Hemisphere 1", ccol.desc.center1);
+		inspect_vec3("Hemisphere 2", ccol.desc.center2);
 		inspect_float("Radius", ccol.desc.radius);
 	}
 }
@@ -346,12 +350,12 @@ void Inspector::on_draw()
 		
 		if(!has_collider && ImGui::Selectable("Sphere collider"))
 		{
-			scol = &graph.emplace<sphere_collider_component>(world->selected_entity, physicsSphere{1.0f});
+			scol = &graph.emplace<sphere_collider_component>(world->selected_entity, physicsSphere{vec3{0.0f}, 1.0f});
 		}
 
 		if(!has_collider && ImGui::Selectable("Capsule collider"))
 		{
-			ccol = &graph.emplace<capsule_collider_component>(world->selected_entity, physicsCapsule{1.0f, 1.0f});
+			ccol = &graph.emplace<capsule_collider_component>(world->selected_entity, physicsCapsule{vec3{0.0f, 0.25f, 0.0f}, vec3{0.0f, -0.25f, 0.0f}, 0.5f});
 		}
 
 		if(!has_collider && ImGui::Selectable("Box collider"))

@@ -2,6 +2,7 @@
 
 #include <penumbra/types.hpp>
 #include <cassert>
+#include <cmath>
 #include <format>
 #include <numbers>
 
@@ -378,7 +379,7 @@ struct std::formatter<penumbra::Vector<T, N, std::index_sequence<Is...>>>
                         ++it;
                 }
 
-                assert(it != ctx.end() && *it != '}' && "invalid format arguments");
+                //assert(it != ctx.end() && *it != '}' && "invalid format arguments");
 
                 return it;
         }

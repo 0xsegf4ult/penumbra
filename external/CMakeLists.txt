@@ -8,6 +8,9 @@ FetchContent_MakeAvailable(spdlog)
 
 add_subdirectory("imgui")
 
+FetchContent_Declare(box3d GIT_REPOSITORY https://github.com/erincatto/box3d.git GIT_TAG v0.1.0)
+FetchContent_MakeAvailable(box3d)
+
 FetchContent_Declare(entt URL https://github.com/skypjack/entt/archive/refs/tags/v3.16.0.zip)
 FetchContent_MakeAvailable(entt)
 

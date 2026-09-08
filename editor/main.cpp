@@ -43,7 +43,7 @@ int main(int argc, const char** argv)
 	renderer_init(window);
 	resource_manager_init();
 
-	physics_create_world({});
+	physics_init();
 
 	auto start = std::chrono::steady_clock::now();
 	auto world_state = std::make_unique<WorldState>();
@@ -122,7 +122,7 @@ int main(int argc, const char** argv)
 	gpu_wait_idle();
 	editor.reset();
 
-	physics_destroy_world();
+	physics_shutdown();
 	resource_manager_shutdown();
 	renderer_shutdown();
 	

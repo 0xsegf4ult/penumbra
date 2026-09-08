@@ -9,7 +9,7 @@ namespace penumbra
 struct rigidbody_component
 {
 	physicsBodyDesc desc;
-	physicsBodyID handle;
+	physicsBody handle;
 };
 
 struct sphere_collider_component
