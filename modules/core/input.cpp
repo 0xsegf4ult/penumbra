@@ -11,6 +11,8 @@
 #include <cassert>
 #include <vector>
 
+#include <tracy/Tracy.hpp>
+
 namespace penumbra
 {
 

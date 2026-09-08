@@ -1,5 +1,6 @@
 #include <penumbra/cvar.hpp>
 #include <penumbra/types.hpp>
+#include <cstring>
 #include <string>
 
 namespace penumbra

@@ -79,38 +79,41 @@ int main(int argc, const char** argv)
 		}
 		renderer_process_frame(double(frame_time.count()) / 1e9);
 
-		std::chrono::nanoseconds vrr_timestep{int(1.0 / double(fps_limit.int_v) * 1e9)};
-		auto ft = std::chrono::steady_clock::now() - start;
-		auto sleep_time = vrr_timestep - ft;
-		if(vrr_timestep > ft)
+		if(fps_limit.int_v > 0)
 		{
-			ZoneScopedN("sleep");
-			static double estimate = 5e-3;
-			static double mean = 5e-3;
-			static double m2 = 0;
-			static int64_t count = 1;
-			double seconds = double(sleep_time.count()) / 1e9;
-			while(seconds > estimate)
+			std::chrono::nanoseconds vrr_timestep{int(1.0 / double(fps_limit.int_v) * 1e9)};
+			auto ft = std::chrono::steady_clock::now() - start;
+			auto sleep_time = vrr_timestep - ft;
+			if(vrr_timestep > ft)
 			{
-				auto slp_start = std::chrono::steady_clock::now();
-				std::this_thread::sleep_for(std::chrono::milliseconds(1));
-				auto slp_end = std::chrono::steady_clock::now();
+				ZoneScopedN("sleep");
+				static double estimate = 5e-3;
+				static double mean = 5e-3;
+				static double m2 = 0;
+				static int64_t count = 1;
+				double seconds = double(sleep_time.count()) / 1e9;
+				while(seconds > estimate)
+				{
+					auto slp_start = std::chrono::steady_clock::now();
+					std::this_thread::sleep_for(std::chrono::milliseconds(1));
+					auto slp_end = std::chrono::steady_clock::now();
 
-				double observed = (slp_end - slp_start).count() / 1e9;
-				seconds -= observed;
+					double observed = (slp_end - slp_start).count() / 1e9;
+					seconds -= observed;
 
-				++count;
-				double delta = observed - mean;
-				mean += delta / count;
-				m2 += delta * (observed - mean);
-				double stddev = std::sqrt(m2 / (count - 1));
-				estimate = mean + stddev;
+					++count;
+					double delta = observed - mean;
+					mean += delta / count;
+					m2 += delta * (observed - mean);
+					double stddev = std::sqrt(m2 / (count - 1));
+					estimate = mean + stddev;
+				}
+
+				auto spin_start = std::chrono::steady_clock::now();
+				auto spinNS = int64_t(seconds * 1e9);
+				auto delay = std::chrono::nanoseconds(spinNS);
+				while(std::chrono::steady_clock::now() - spin_start < delay) {}
 			}
-
-			auto spin_start = std::chrono::steady_clock::now();
-			auto spinNS = int64_t(seconds * 1e9);
-			auto delay = std::chrono::nanoseconds(spinNS);
-			while(std::chrono::steady_clock::now() - spin_start < delay) {}
 		}
 
 		FrameMark;

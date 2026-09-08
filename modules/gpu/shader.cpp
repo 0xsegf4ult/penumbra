@@ -5,9 +5,11 @@
 #include <penumbra/types.hpp>
 
 #include <array>
+#include <cstring>
 #include <expected>
 #include <format>
 #include <string>
+#include <vector>
 
 namespace penumbra
 {

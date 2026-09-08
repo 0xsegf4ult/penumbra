@@ -12,6 +12,8 @@
 #include <SDL3/SDL_mouse.h>
 #include <SDL3/SDL_messagebox.h>
 
+#include <tracy/Tracy.hpp>
+
 namespace penumbra
 {
 
@@ -64,6 +66,8 @@ void wm_destroy_window(window_t window)
 
 void wm_poll_events()
 {
+	ZoneScoped;
+
 	SDL_Event event;
 
 	while(SDL_PollEvent(&event))
@@ -89,6 +93,8 @@ bool wm_requested_close()
 
 uvec2 wm_get_size(window_t window)
 {
+	ZoneScoped;
+
 	int w, h;
 	SDL_GetWindowSize(reinterpret_cast<SDL_Window*>(window), &w, &h);
 	return {static_cast<u32>(w), static_cast<u32>(h)};

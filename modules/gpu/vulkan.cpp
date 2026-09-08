@@ -128,6 +128,7 @@ struct GPUBuffer
 	VkDeviceMemory allocation;
 	void* mapped;
 	size_t size;
+	GPUMemoryHeap heap;
 };
 
 struct ImageViewInfo
@@ -801,16 +802,16 @@ static std::optional<u32> get_memory_type(u32 type, VkMemoryPropertyFlags flags)
 	return std::nullopt;
 }
 
+constexpr const char* heap_names[] = 
+{
+	"GPU_HEAP_HOST",
+	"GPU_HEAP_PRIVATE",
+	"GPU_HEAP_MAPPED",
+	"GPU_HEAP_READBACK"
+};
+
 GPUPointer gpu_allocate_memory(size_t size, GPUMemoryHeap heap, GPUBufferUsage usage)
 {
-	constexpr const char* heap_names[] = 
-	{
-		"HOST",
-		"PRIVATE",
-		"MAPPED",
-		"READBACK"
-	};
-
 	std::array<u32, 3> indices;
 	indices[0] = gpu_context->queue_data[0].family;
 	indices[1] = gpu_context->queue_data[1].family;
@@ -894,11 +895,13 @@ GPUPointer gpu_allocate_memory(size_t size, GPUMemoryHeap heap, GPUBufferUsage u
 		return {0, 0};
 	}
 
+	TracyAllocN(mem, size, heap_names[heap]);
+
 	void* ptr = nullptr;
 	if(heap != GPU_MEMORY_PRIVATE)
 		vkMapMemory(gpu_context->device, mem, 0, size, 0, &ptr);
 
-	gpu_context->buffers.emplace_back(buf, mem, ptr, size);
+	gpu_context->buffers.emplace_back(buf, mem, ptr, size, heap);
 	auto handle = gpu_context->buffers.size();
 
 	return {handle, 0};
@@ -908,6 +911,8 @@ void gpu_free_memory(GPUPointer& ptr)
 {
 	assert(ptr.handle);
 	auto& buffer = gpu_context->buffers[ptr.handle - 1];
+
+	TracyFreeN(buffer.allocation, heap_names[buffer.heap]);
 
 	vkDestroyBuffer(gpu_context->device, buffer.handle, nullptr);
 	vkFreeMemory(gpu_context->device, buffer.allocation, nullptr);
@@ -1019,7 +1024,9 @@ GPUTexture gpu_create_texture(const GPUTextureDesc& desc)
 		log::error("gpu_vulkan: failed to allocate texture memory: {}", string_VkResult(status));
 		return GPUTexture{0u};
 	}
-	
+
+	TracyAllocN(memory, alloc.allocationSize, heap_names[GPU_MEMORY_PRIVATE]);
+
 	status = vkBindImageMemory(gpu_context->device, handle, memory, 0);
 	if(status != VK_SUCCESS)
 	{
@@ -1038,6 +1045,8 @@ void gpu_destroy_texture(GPUTexture tex)
 
 	for(auto& view : tex_info.views)
 		vkDestroyImageView(gpu_context->device, view.handle, nullptr);
+
+	TracyFreeN(tex_info.allocation, heap_names[GPU_MEMORY_PRIVATE]);
 
 	vkDestroyImage(gpu_context->device, tex_info.handle, nullptr);
 	vkFreeMemory(gpu_context->device, tex_info.allocation, nullptr);
