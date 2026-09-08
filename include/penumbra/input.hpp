@@ -72,5 +72,6 @@ bool input_stop_text_input();
 void input_set_mouse_capture(bool state);
 vec2 input_get_mouse_pos();
 vec2 input_get_mouse_delta();
+bool input_is_mouse_down(u8 button);
 
 }

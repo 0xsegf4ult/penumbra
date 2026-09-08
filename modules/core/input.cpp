@@ -25,6 +25,7 @@ struct input_state_t
 	const bool* key_states{nullptr};
 
 	std::vector<input_listener_t> listeners;
+	bool mouse_buttons[5];
 
 	bool capture_mouse{false};
 };
@@ -47,12 +48,15 @@ void input_shutdown()
 
 void input_poll()
 {
+	ZoneScoped;
 	assert(input_state);
+
+	SDL_MouseButtonFlags buttons;
 
 	if(input_state->capture_mouse)
 	{
 		float dx, dy;
-		SDL_GetRelativeMouseState(&dx, &dy);
+		buttons = SDL_GetRelativeMouseState(&dx, &dy);
 		vec2 delta{dx, dy};
 		input_state->mouse_delta = delta;
 		input_state->mouse_pos += delta;
@@ -60,12 +64,18 @@ void input_poll()
 	else
 	{
 		float mx, my;
-		SDL_GetGlobalMouseState(&mx, &my);
+		buttons = SDL_GetGlobalMouseState(&mx, &my);
 
 		vec2 mpos{mx, my};
 		input_state->mouse_delta = mpos - input_state->mouse_pos;
 		input_state->mouse_pos = mpos;
 	}
+
+	input_state->mouse_buttons[0] = buttons & SDL_BUTTON_LMASK;
+	input_state->mouse_buttons[1] = buttons & SDL_BUTTON_RMASK;
+	input_state->mouse_buttons[2] = buttons & SDL_BUTTON_MMASK;
+	input_state->mouse_buttons[3] = buttons & SDL_BUTTON_X1MASK;
+	input_state->mouse_buttons[4] = buttons & SDL_BUTTON_X2MASK;
 }
 
 static void listener_dispatch(const input_event_t& event)
@@ -195,6 +205,12 @@ vec2 input_get_mouse_delta()
 {
 	assert(input_state);
 	return input_state->mouse_delta;
+}
+
+bool input_is_mouse_down(u8 button)
+{
+	assert(input_state);
+	return input_state->mouse_buttons[button - 1];
 }
 
 }
