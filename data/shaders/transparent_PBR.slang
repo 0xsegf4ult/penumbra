@@ -20,7 +20,6 @@ struct VSOutput
 	float2 uv : UV0;
 	float3 normal : NORMAL;
 	uint material : MATERIAL;
-	uint drawID : DRAW_ID;
 };
 
 [shader("vertex")]
@@ -29,7 +28,6 @@ VSOutput vertexMain(uniform PSOInput input, uint index : SV_VulkanVertexID, uint
 	VSOutput output;
 	output.uv = consts.vertex_uv[index];
 	output.material = input.renderables[input.instances[instance].renderable_index].material_offset;
-	output.drawID = instance;
 
 	float4x4 trs = input.renderables[input.instances[instance].renderable_index].transform;
 	

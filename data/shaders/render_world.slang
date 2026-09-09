@@ -56,7 +56,6 @@ struct DrawIndexedIndirectCommand
 
 struct VisCounters
 {
-	uint renderable_count;
 	uint visible_meshlets;
 	uint threadgroup_count;
 };

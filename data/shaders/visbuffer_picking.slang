@@ -20,5 +20,5 @@ void computeMain(uniform CSInput data)
 	uint meshletID = (primitiveID >> 7) - 1;
 	
 	if(meshletID < 65536)	
-		*(data.output) = data.instances[meshletID].renderable_index;
+		*(data.output) = data.instances[meshletID].renderable_index + 1u;
 }	

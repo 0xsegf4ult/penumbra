@@ -14,6 +14,8 @@
 
 #include <tracy/Tracy.hpp>
 
+#include <format>
+
 namespace penumbra
 {
 
@@ -52,8 +54,10 @@ void wm_message_box(const char* title, const char* message, WM_MSGBOX_TYPE type)
 window_t wm_create_window(const char* title, uvec2 wnd_size)
 {
 	SDL_Window* wnd = SDL_CreateWindow(title, wnd_size.w, wnd_size.h, SDL_WINDOW_RESIZABLE | SDL_WINDOW_VULKAN);
+
+	auto msg = std::format("Failed to create window: {}", SDL_GetError());
 	if(!wnd)
-		panic("Failed to create window");
+		panic(msg.c_str());
 
 	return reinterpret_cast<window_t>(wnd);
 }

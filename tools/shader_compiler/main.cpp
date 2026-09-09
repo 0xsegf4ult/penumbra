@@ -94,7 +94,7 @@ int main(int argc, const char** argv)
 	target_desc.profile = global_session->findProfile("spirv_1_6");
 	target_desc.forceGLSLScalarBufferLayout = true;
 
-	std::array<slang::CompilerOptionEntry, 4> options =
+	std::array<slang::CompilerOptionEntry, 5> options =
 	{
 		slang::CompilerOptionEntry 
 		{
@@ -111,14 +111,14 @@ int main(int argc, const char** argv)
 			slang::CompilerOptionName::DebugInformation,
 			{slang::CompilerOptionValueKind::Int, 2, 0, nullptr, nullptr}
 		},
-		/*slang::CompilerOptionEntry
+		slang::CompilerOptionEntry
 		{
 			slang::CompilerOptionName::Capability,
 			{
 				.kind = slang::CompilerOptionValueKind::String,
 				.stringValue0 = "vk_mem_model"
 			}
-		},*/
+		},
 		slang::CompilerOptionEntry
 		{
 			slang::CompilerOptionName::BindlessSpaceIndex,

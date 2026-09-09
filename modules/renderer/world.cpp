@@ -5,6 +5,7 @@
 #include <penumbra/renderer.hpp>
 #include <penumbra/resource.hpp>
 #include <penumbra/config.hpp>
+#include <penumbra/cvar.hpp>
 #include <penumbra/log.hpp>
 #include <penumbra/types.hpp>
 #include <penumbra/math/plane.hpp>
@@ -48,13 +49,13 @@ struct render_view
 	u32 primitive_capacity = 65536u;
 
 	GPUPointer visible_meshlets;
-	GPUPointer meshlet_instances;
+	GPUPointer counters;
 	GPUPointer dispatch_args;
-	GPUPointer indirect_args;
+	
+	GPUPointer meshlet_instances;
 	GPUPointer indirect_commands;
-	GPUPointer meshlet_sums;
+	GPUPointer bucket_counters; 
 
-	GPUPointer counters[config::renderer_frames_in_flight];
 	GPUPointer buckets[config::renderer_frames_in_flight];
 	GPUPointer cbuffer[config::renderer_frames_in_flight];
 
@@ -99,7 +100,6 @@ struct GPUWorldMeshletInstance
 
 struct GPUWorldCounters
 {
-	u32 renderable_count;
 	u32 visible_meshlets;
 	u32 threadgroup_count;
 };
@@ -128,9 +128,43 @@ static GPUPipeline skinning_cs;
 static GPUPipeline vis_phase1_cs;
 static GPUPipeline vis_phase2_cs;
 
+static void set_fcull_cv(cvar_t* cvar)
+{
+	if(cvar->int_v)
+		world->views[0].flags |= RENDER_VIEW_FRUSTUM_CULL;
+       	else
+		world->views[0].flags &= ~RENDER_VIEW_FRUSTUM_CULL;
+}	
+
+static cvar_t fcull_cv
+{
+	.name = "r_frustumcull",
+	.type = CVAR_TYPE_INT,
+	.int_defv = 1,
+	.int_v = 1,
+	.callback = set_fcull_cv
+};
+
+static void set_frcull_cv(cvar_t* cvar)
+{
+	world->views[0].freeze_culling = (cvar->int_v > 0);
+}
+
+static cvar_t frcull_cv
+{
+	.name = "r_freezeculling",
+	.type = CVAR_TYPE_INT,
+	.int_defv = 0,
+	.int_v = 0,
+	.callback = set_frcull_cv
+};
+
 void renderer_world_init()
 {
 	world = new render_world();
+
+	cvar_register(&fcull_cv);
+	cvar_register(&frcull_cv);
 
 	skinning_cs = gpu_create_compute_pipeline(load_shader("shaders/geometry_skinning"));
 	vis_phase1_cs = gpu_create_compute_pipeline(load_shader("shaders/vis_phase1"));
@@ -145,17 +179,13 @@ static void renderer_destroy_view(render_view& view)
 	for(auto& elem : view.cbuffer)
 		gpu_free_memory(elem);
 
-	for(auto& elem : view.counters)
-		gpu_free_memory(elem);
-
 	for(auto& elem : view.buckets)
 		gpu_free_memory(elem);
-
+	
+	gpu_free_memory(view.bucket_counters);
 	gpu_free_memory(view.indirect_commands);
-
-	gpu_free_memory(view.meshlet_sums);
-	gpu_free_memory(view.indirect_args);
 	gpu_free_memory(view.dispatch_args);
+	gpu_free_memory(view.counters);
 	gpu_free_memory(view.visible_meshlets);
 	gpu_free_memory(view.meshlet_instances);
 }
@@ -183,16 +213,15 @@ renderViewID renderer_create_view(const render_view_desc& desc)
 	view.meshlet_instances = gpu_allocate_memory(sizeof(GPUWorldMeshletInstance) * view.primitive_capacity);
 	view.visible_meshlets = gpu_allocate_memory(sizeof(GPUWorldMeshlet) * view.primitive_capacity);
 	view.dispatch_args = gpu_allocate_memory(sizeof(uvec3), GPU_MEMORY_PRIVATE, GPU_BUFFER_INDIRECT);
-	view.indirect_args = gpu_allocate_memory(sizeof(GPUIndirectCommand) * RENDER_BUCKET_COUNT, GPU_MEMORY_PRIVATE, GPU_BUFFER_INDIRECT);
-	view.meshlet_sums = gpu_allocate_memory(sizeof(uint) * (RENDER_BUCKET_COUNT + 1));
-	
+	view.counters = gpu_allocate_memory(sizeof(GPUWorldCounters));
+	view.bucket_counters = gpu_allocate_memory(sizeof(u32) * RENDER_BUCKET_COUNT, GPU_MEMORY_PRIVATE, GPU_BUFFER_INDIRECT);
 	view.indirect_commands = gpu_allocate_memory(sizeof(GPUIndexedIndirectCommand) * view.primitive_capacity, GPU_MEMORY_PRIVATE, GPU_BUFFER_INDIRECT);
+
 
 	for(int i = 0; i < config::renderer_frames_in_flight; i++)
 	{
 		view.cbuffer[i] = gpu_allocate_memory(sizeof(renderview_cbuffer), GPU_MEMORY_MAPPED, GPU_BUFFER_UNIFORM);
-		view.counters[i] = gpu_allocate_memory(sizeof(GPUWorldCounters), GPU_MEMORY_MAPPED);
-		view.buckets[i] = gpu_allocate_memory(sizeof(uvec2) * RENDER_BUCKET_COUNT, GPU_MEMORY_MAPPED, GPU_BUFFER_INDIRECT);
+		view.buckets[i] = gpu_allocate_memory(sizeof(u32) * RENDER_BUCKET_COUNT, GPU_MEMORY_MAPPED);
 	}
 
 	view.is_shadow = desc.is_shadow;
@@ -441,15 +470,13 @@ static void renderer_world_vis_prepare(GPUCommandBuffer& cmd)
 		}
 		cbuffer->lod_bias = view.lod_bias;
 
-		for(int i = 0; i < RENDER_BUCKET_COUNT; i++)	
-			*(reinterpret_cast<uvec2*>(gpu_map_memory(view.buckets[renderer_gfx_frame_index()])) + i) = {world->bucket_offsets[i], 0};
+		for(int i = 0; i < RENDER_BUCKET_COUNT; i++)
+		{
+			*(reinterpret_cast<u32*>(gpu_map_memory(view.buckets[renderer_gfx_frame_index()])) + i) = world->bucket_offsets[i];
+		}
 
-		gpu_mem_clear(cmd, view.meshlet_sums, sizeof(uint) * (RENDER_BUCKET_COUNT + 1));
-		gpu_mem_clear(cmd, view.indirect_args, sizeof(GPUIndirectCommand) * RENDER_BUCKET_COUNT);
-		auto* counters = reinterpret_cast<GPUWorldCounters*>(gpu_map_memory(view.counters[renderer_gfx_frame_index()]));
-		counters->renderable_count = world->object_count;
-		counters->visible_meshlets = 0;
-		counters->threadgroup_count = 0;
+		gpu_mem_clear(cmd, view.counters, sizeof(GPUWorldCounters));
+		gpu_mem_clear(cmd, view.bucket_counters, sizeof(u32) * RENDER_BUCKET_COUNT);
 	}
 }
 
@@ -463,18 +490,18 @@ static void renderer_world_vis_phase1(GPUCommandBuffer& cmd)
 		GPUDevicePointer lods;
 		GPUDevicePointer counters;
 		GPUDevicePointer visible_meshlets;
-		GPUDevicePointer meshlet_sums;
 		GPUDevicePointer dispatch_args;
+		u32 instance_count;
 	} shader_data;
 
 	shader_data.renderables = gpu_host_to_device_pointer(world->objects);
 	shader_data.lods = gpu_host_to_device_pointer(renderer_geometry_get_storage().lod);
+	shader_data.instance_count = world->object_count;
 
 	for(auto& view : world->views)
 	{
-		shader_data.counters = gpu_host_to_device_pointer(view.counters[renderer_gfx_frame_index()]);
+		shader_data.counters = gpu_host_to_device_pointer(view.counters);
 		shader_data.visible_meshlets = gpu_host_to_device_pointer(view.visible_meshlets);
-		shader_data.meshlet_sums = gpu_host_to_device_pointer(view.meshlet_sums);
 		shader_data.dispatch_args = gpu_host_to_device_pointer(view.dispatch_args);
 
 		gpu_write_cbuffer_descriptor(cmd, view.cbuffer[renderer_gfx_frame_index()]);
@@ -493,8 +520,8 @@ static void renderer_world_vis_phase2(GPUCommandBuffer& cmd)
 		GPUDevicePointer counters;
 		GPUDevicePointer visible_meshlets;
 		GPUDevicePointer meshlet_instances;
-		GPUDevicePointer meshlet_sums;
 		GPUDevicePointer buckets;
+		GPUDevicePointer bucket_counters;
 		GPUDevicePointer indirect_args;
 	} shader_data;
 
@@ -503,11 +530,11 @@ static void renderer_world_vis_phase2(GPUCommandBuffer& cmd)
 
 	for(auto& view : world->views)
 	{
-		shader_data.counters = gpu_host_to_device_pointer(view.counters[renderer_gfx_frame_index()]);
+		shader_data.counters = gpu_host_to_device_pointer(view.counters);
 		shader_data.visible_meshlets = gpu_host_to_device_pointer(view.visible_meshlets);
 		shader_data.meshlet_instances = gpu_host_to_device_pointer(view.meshlet_instances);
-		shader_data.meshlet_sums = gpu_host_to_device_pointer(view.meshlet_sums);
 		shader_data.buckets = gpu_host_to_device_pointer(view.buckets[renderer_gfx_frame_index()]);
+		shader_data.bucket_counters = gpu_host_to_device_pointer(view.bucket_counters);
 		shader_data.indirect_args = gpu_host_to_device_pointer(view.indirect_commands);
 
 		gpu_write_cbuffer_descriptor(cmd, view.cbuffer[renderer_gfx_frame_index()]);
@@ -523,8 +550,8 @@ void renderer_world_determine_visibility(GPUCommandBuffer& cmd)
 	gpu_barrier(cmd, GPU_STAGE_TRANSFER, GPU_STAGE_COMPUTE);
 
 	renderer_world_vis_phase1(cmd);
-	gpu_barrier(cmd, GPU_STAGE_COMPUTE, GPU_STAGE_COMPUTE);
-	
+	gpu_barrier(cmd, GPU_STAGE_COMPUTE, GPU_STAGE_COMPUTE | GPU_STAGE_COMMAND_PROCESSOR, GPU_HAZARD_MEMORY | GPU_HAZARD_INDIRECT_ARGS);
+
 	renderer_world_vis_phase2(cmd);
 	gpu_barrier(cmd, GPU_STAGE_COMPUTE, GPU_STAGE_COMMAND_PROCESSOR | GPU_STAGE_VERTEX_SHADER | GPU_STAGE_COMPUTE, GPU_HAZARD_MEMORY | GPU_HAZARD_INDIRECT_ARGS);
 }
@@ -541,7 +568,7 @@ render_bucket_draw renderer_world_get_drawcall(renderViewID id, render_bucket bu
 
 	return 
 	{
-		view.indirect_args + (bucket * sizeof(GPUIndirectCommand)),
+		view.indirect_commands + (bucket * sizeof(GPUIndirectCommand)),
 		view.meshlet_instances,
 	};
 }
@@ -554,7 +581,7 @@ render_bucket_mdi_draw renderer_world_get_mdi_drawcall(renderViewID id, render_b
 	return
 	{
 		view.indirect_commands + (world->bucket_offsets[bucket] * sizeof(GPUIndexedIndirectCommand)),
-		view.buckets[renderer_gfx_frame_index()] + (bucket * sizeof(uvec2) + sizeof(u32)),
+		view.bucket_counters + (bucket * sizeof(u32)),
 		view.meshlet_instances,
 		world->bucket_sizes[bucket]
 	};

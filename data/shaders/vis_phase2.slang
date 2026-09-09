@@ -8,8 +8,8 @@ struct CSInput
 	Ptr<VisCounters, Access.ReadWrite> counters;
 	Ptr<GPUWorldMeshlet, Access.Read> meshlets;
 	Ptr<GPUWorldMeshletInstance, Access.ReadWrite> instances;
-	Ptr<uint, Access.Read> meshlet_sums;
-	Ptr<GPUWorldBucket, Access.ReadWrite> buckets;
+	Ptr<uint, Access.Read> buckets;
+	Ptr<uint, Access.ReadWrite> bucket_counters;
 	Ptr<DrawIndexedIndirectCommand, Access.ReadWrite> indirect_args;
 };
 
@@ -65,36 +65,18 @@ void computeMain(uint DTid: SV_DispatchThreadID, uint Gidx : SV_GroupIndex, unif
 		if(is_visible(center, radius, cone_axis, cluster->cone.w))
 		{
 			uint idx;
-			InterlockedAdd(input.buckets[meshlet.bucket].counter, 1u, idx);
-/*
-			InterlockedAdd(input.indirect_args[meshlet.bucket].instance_count, 1u, idx);
-			if(idx == 0)
-			{
-				input.indirect_args[meshlet.bucket].first_instance = input.meshlet_sums[meshlet.bucket];
-			}
-
-			InterlockedMax(input.indirect_args[meshlet.bucket].vertex_count, cluster.vertex_count);
-*/
-			Ptr<GPUWorldMeshletInstance, Access.ReadWrite> instance = input.instances + (input.meshlet_sums[meshlet.bucket] + idx);
+			InterlockedAdd(input.bucket_counters[meshlet.bucket], 1u, idx);
+			
+			Ptr<GPUWorldMeshletInstance, Access.ReadWrite> instance = input.instances + (input.buckets[meshlet.bucket] + idx);
 			instance->renderable_index = meshlet->renderable_index;
 			instance->meshlet_index = meshlet->meshlet_index;
 
-			Ptr<DrawIndexedIndirectCommand, Access.ReadWrite> command = input.indirect_args + (input.buckets[meshlet.bucket].offset + idx);	
+			Ptr<DrawIndexedIndirectCommand, Access.ReadWrite> command = input.indirect_args + (input.buckets[meshlet.bucket] + idx);	
 			command->index_count = cluster->index_count;
 			command->instance_count = 1u;
 			command->first_index = renderable->geom_idx_offset + cluster->index_offset;
 			command->first_vertex = renderable->geom_vtx_offset + cluster->vertex_offset;
-			command->first_instance = input.meshlet_sums[meshlet.bucket] + idx;
+			command->first_instance = input.buckets[meshlet.bucket] + idx;
 		}
-	}	
-
-	AllMemoryBarrierWithGroupSync();
-
-	if(Gidx == 0)
-	{
-		uint tgid;
-		InterlockedAdd(input.counters.threadgroup_count, 1u, tgid);
-		uint tgcount = (input.counters.visible_meshlets + 63) / 64;
-		bool last_thr = (tgid + 1 == tgcount);
 	}	
 }

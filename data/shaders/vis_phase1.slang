@@ -7,8 +7,8 @@ struct CSInput
 	Ptr<GeometryLOD, Access.Read> geom_lods;
 	Ptr<VisCounters, Access.ReadWrite> counters;
 	Ptr<GPUWorldMeshlet, Access.ReadWrite> visible_meshlets;
-	Ptr<uint, Access.ReadWrite> meshlet_sums;
 	Ptr<uint3, Access.ReadWrite> dispatch_args;
+	uint renderable_count;
 };
 
 ConstantBuffer<CullingData> culling_data;
@@ -40,7 +40,7 @@ bool is_visible(float4 sphere, float radius)
 [numthreads(64, 1, 1)]
 void computeMain(uint DTid : SV_DispatchThreadID, uint Gidx : SV_GroupIndex, uniform CSInput input)
 {
-	bool visible = (DTid < input.counters.renderable_count);
+	bool visible = (DTid < input.renderable_count);
 
 	Ptr<GPUWorldRenderable, Access.Read> renderable = input.renderables + DTid;
 	if(visible)
@@ -78,8 +78,6 @@ void computeMain(uint DTid : SV_DispatchThreadID, uint Gidx : SV_GroupIndex, uni
 			input.visible_meshlets[first_meshlet + i] = meshlet;
 			++meshlet.meshlet_index;
 		}
-
-		InterlockedAdd(input.meshlet_sums[(renderable->pack_bucket_lcount >> 16) + 1], lod.cluster_count);
 	}
 
 	AllMemoryBarrierWithGroupSync();
@@ -88,7 +86,7 @@ void computeMain(uint DTid : SV_DispatchThreadID, uint Gidx : SV_GroupIndex, uni
 	{
 		uint tgid;
 		InterlockedAdd(input.counters.threadgroup_count, 1u, tgid);
-		uint tgcount = (input.counters.renderable_count + 63) / 64;
+		uint tgcount = (input.renderable_count + 63) / 64;
 		bool last_thr = (tgid + 1 == tgcount);
 
 		if(last_thr)
@@ -96,14 +94,6 @@ void computeMain(uint DTid : SV_DispatchThreadID, uint Gidx : SV_GroupIndex, uni
 			input.dispatch_args[0].x = (input.counters.visible_meshlets + 63) / 64;
 			input.dispatch_args[0].y = 1;
 			input.dispatch_args[0].z = 1;
-		
-			uint prev_bcount = 0;
-			for(uint i = 1; i < 6; i++)
-			{
-				uint old;
-				InterlockedAdd(input.meshlet_sums[i], prev_bcount, old);
-				prev_bcount += old;
-			}
 
 			input.counters.threadgroup_count = 0;
 		}
