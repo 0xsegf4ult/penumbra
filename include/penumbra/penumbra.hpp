@@ -2,6 +2,7 @@
 
 #include <penumbra/array_proxy.hpp>
 #include <penumbra/config.hpp>
+#include <penumbra/cmd.hpp>
 #include <penumbra/cvar.hpp>
 #include <penumbra/ecs.hpp>
 #include <penumbra/gpu.hpp>

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <penumbra/types.hpp>
+#include <string_view>
 
 namespace penumbra
 {
@@ -14,14 +15,14 @@ enum cvar_type
 
 struct cvar_t
 {
-	const char* name;
+	std::string_view name;
 	cvar_type type;
 
 	union
 	{
 		int int_defv;
 		float float_defv;
-		const char* string_defv;
+		std::string_view string_defv;
 	};
 
 	union
@@ -38,7 +39,8 @@ struct cvar_t
 
 
 void cvar_register(cvar_t* cvar);
-cvar_t* cvar_get(const char* name);
+cvar_t* cvar_get(std::string_view name);
 void cvar_set(cvar_t* cvar, u64 value);
+void cvar_set_string(cvar_t* cvar, std::string_view str);
 
 }

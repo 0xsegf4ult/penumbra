@@ -1,6 +1,7 @@
 #include <widgets/console.hpp>
 #include <widgets/widget.hpp>
 
+#include <penumbra/cmd.hpp>
 #include <penumbra/ui.hpp>
 #include <penumbra/types.hpp>
 
@@ -49,6 +50,8 @@ void ConsoleWidget::on_draw()
 	}))
 	{
 		auto cmd = std::string(input_buffer);
+		cmd_executestring(input_buffer);
+
 		items.push_back("# " + cmd);
 		history.push_back(cmd);
 		input_buffer[0] = '\0';

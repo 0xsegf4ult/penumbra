@@ -10,6 +10,7 @@ target_link_libraries(penumbra_core PUBLIC Tracy::TracyClient ${PENUMBRA_CORE_LI
 target_include_directories(penumbra_core PUBLIC ${PROJECT_SOURCE_DIR}/include)
 target_sources(penumbra_core
 	PRIVATE
+	cmd.cpp
 	cvar.cpp
 	input.cpp
 	memory.cpp
