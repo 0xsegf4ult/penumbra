@@ -94,6 +94,7 @@ void renderer_update_environment(const render_environment_data& data);
 renderViewID renderer_create_view(const render_view_desc& desc);
 void renderer_update_view(renderViewID view, const render_camera_data& camera);
 renderObjectID renderer_world_insert_object(const render_object_desc& desc);
+void renderer_world_remove_object(renderObjectID object);
 void renderer_world_set_visible(renderObjectID object, bool visible);
 void renderer_world_update_object(renderObjectID object, const mat4& transform);
 void renderer_world_update_skin(renderObjectID object, const mat4* bones, u16 count);

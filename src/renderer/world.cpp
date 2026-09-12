@@ -21,14 +21,13 @@
 namespace penumbra
 {
 
-constexpr size_t CULL_KERNEL_SIZE = 512;
-
 enum renderview_flags
 {
 	RENDER_VIEW_FRUSTUM_CULL = 0x1,
 	RENDER_VIEW_CONE_CULL = 0x2,
-	RENDER_VIEW_OCCLUSION_CULL = 0x4,
-	RENDER_VIEW_ORTHOGRAPHIC = 0x8
+	RENDER_VIEW_CONTRIBUTION_CULL = 0x4,
+	RENDER_VIEW_OCCLUSION_CULL = 0x8,
+	RENDER_VIEW_ORTHOGRAPHIC = 0x10,
 };
 
 struct renderview_cbuffer
@@ -40,6 +39,9 @@ struct renderview_cbuffer
 	float lod_step;
 	float znear;
 	float zfar;
+	float projX;
+	float projY;
+	float min_contrib;
 	u32 flags;
 	u32 lod_bias;
 };
@@ -109,6 +111,8 @@ struct render_world
 	u32 object_capacity = 16384u;
 	u32 object_count = 0u;
 
+	std::vector<u64> id_alloc_bitmap;
+
 	GPUPointer host_objects;
 	GPUPointer objects;
 
@@ -145,6 +149,23 @@ static cvar_t fcull_cv
 	.callback = set_fcull_cv
 };
 
+static void set_ctcull_cv(cvar_t* cvar)
+{
+	if(cvar->int_v)
+		world->views[0].flags |= RENDER_VIEW_CONTRIBUTION_CULL;
+	else
+		world->views[0].flags &= ~RENDER_VIEW_CONTRIBUTION_CULL;
+}
+
+static cvar_t ctcull_cv
+{
+	.name = "r_contribcull",
+	.type = CVAR_TYPE_INT,
+	.int_defv = 1,
+	.int_v = 1,
+	.callback = set_ctcull_cv
+};
+
 static void set_frcull_cv(cvar_t* cvar)
 {
 	world->views[0].freeze_culling = (cvar->int_v > 0);
@@ -165,6 +186,7 @@ void renderer_world_init()
 
 	cvar_register(&fcull_cv);
 	cvar_register(&frcull_cv);
+	cvar_register(&ctcull_cv);
 
 	skinning_cs = gpu_create_compute_pipeline(load_shader("shaders/geometry_skinning"));
 	vis_phase1_cs = gpu_create_compute_pipeline(load_shader("shaders/vis_phase1"));
@@ -172,6 +194,10 @@ void renderer_world_init()
 
 	world->host_objects = gpu_allocate_memory(sizeof(render_object_data) * world->object_capacity, GPU_MEMORY_HOST, GPU_BUFFER_UPLOAD);
 	world->objects = gpu_allocate_memory(sizeof(render_object_data) * world->object_capacity);
+
+	world->id_alloc_bitmap.resize(world->object_capacity / 64);
+	for(auto& word : world->id_alloc_bitmap)
+		word = ~(0ull);
 }
 
 static void renderer_destroy_view(render_view& view)
@@ -225,7 +251,7 @@ renderViewID renderer_create_view(const render_view_desc& desc)
 	}
 
 	view.is_shadow = desc.is_shadow;
-	view.flags = RENDER_VIEW_FRUSTUM_CULL;
+	view.flags = RENDER_VIEW_FRUSTUM_CULL | RENDER_VIEW_CONTRIBUTION_CULL;
 	if(!desc.is_shadow)
 		view.flags |= RENDER_VIEW_CONE_CULL;
 
@@ -265,6 +291,15 @@ void renderer_update_view(renderViewID id, const render_camera_data& cam)
 
 	cbuffer->znear = cam.znear;
 	cbuffer->zfar = cam.zfar;
+	cbuffer->projX = cam.proj[0][0];
+	cbuffer->projY = cam.proj[1][1];
+	cbuffer->min_contrib = 0.01f;
+	if(id == 2)
+		cbuffer->min_contrib = 0.005f;
+	if(id == 3)
+		cbuffer->min_contrib = 0.0005f;
+	if(id == 4)
+		cbuffer->min_contrib = 0.0001f;
 }
 
 render_bucket determine_bucket(u32 mtl_flags)
@@ -295,17 +330,32 @@ renderObjectID renderer_world_insert_object(const render_object_desc& desc)
 {
 	ZoneScoped;
 
-	if(world->object_count >= world->object_capacity)
+	u32 index = 0;
+
+	for(size_t i = 0; i < world->id_alloc_bitmap.size(); i++)
+	{
+		u64 word = world->id_alloc_bitmap[i];
+		if(word == 0)
+			continue;
+
+		int bit = __builtin_ctzll(word);
+		world->id_alloc_bitmap[i] &= ~(1ull << bit);
+		index = (i * 64 + bit) + 1;
+		break;
+	}
+
+	if(!index)
 	{
 		log::warn("render_world: object storage capacity [{}] exceeded", world->object_capacity);
 		return renderObjectID{0};
 	}
 	
+	if(index > world->object_count)
+		world->object_count = index;
 
-	render_object_data* obj = reinterpret_cast<render_object_data*>(gpu_map_memory(world->host_objects)) + world->object_count;
+	render_object_data* obj = reinterpret_cast<render_object_data*>(gpu_map_memory(world->host_objects)) + (index - 1);
 	
-	world->object_count++;
-	renderObjectID handle{world->object_count};
+	renderObjectID handle{index};
 	world->dirty_objects.push_back(handle);
 
 	obj->transform = desc.transform;
@@ -338,6 +388,7 @@ renderObjectID renderer_world_insert_object(const render_object_desc& desc)
 	obj->geom_vtx_offset = vtx_offset;
 	obj->geom_idx_offset = geom_data.index_offset;
 	obj->geom_cluster_offset = geom_data.cluster_offset;
+	obj->flags = 0;
 
 	world->bucket_sizes[bucket] += geom_data.l0_cluster_count;
 
@@ -369,6 +420,19 @@ void renderer_world_set_visible(renderObjectID object, bool visible)
 		data->flags |= RENDER_OBJECT_DISABLED;
 
 	world->dirty_objects.push_back(object);
+}
+
+void renderer_world_remove_object(renderObjectID object)
+{
+	renderer_world_set_visible(object, false);
+
+	if(object == world->object_count)
+		world->object_count--;
+
+	u32 raw = object - 1;
+	u32 map_offset = raw / 64;
+	u32 bit_offset = raw % 64;
+	world->id_alloc_bitmap[map_offset] |= (1ull << bit_offset);
 }
 
 void renderer_world_update_skin(renderObjectID object, const mat4* bones, u16 count)

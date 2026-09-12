@@ -67,15 +67,17 @@ enum GPUDepthMode : u32
 
 enum GPUStage : u32
 {
-	GPU_STAGE_NONE = 0,
-	GPU_STAGE_TRANSFER = 0x1,
-	GPU_STAGE_COMMAND_PROCESSOR = 0x2,	
-	GPU_STAGE_COMPUTE = 0x4,
-	GPU_STAGE_RASTER_COLOR_OUTPUT = 0x8,
-	GPU_STAGE_RASTER_DEPTH_OUTPUT = 0x10,
-	GPU_STAGE_FRAGMENT_SHADER = 0x20,
-	GPU_STAGE_VERTEX_SHADER = 0x40,
-	GPU_STAGE_ALL = 0x80
+	GPU_STAGE_NONE 			= 0,
+	GPU_STAGE_COMMAND_PROCESSOR 	= 0x1,	
+	GPU_STAGE_VERTEX_SHADER 	= 0x2,
+	GPU_STAGE_MESH_SHADER		= 0x4,
+	GPU_STAGE_RASTER_DEPTH_OUTPUT 	= 0x8,
+	GPU_STAGE_FRAGMENT_SHADER 	= 0x10,
+	GPU_STAGE_RASTER_COLOR_OUTPUT 	= 0x20,
+	GPU_STAGE_COMPUTE 		= 0x40,
+	GPU_STAGE_TRANSFER 		= 0x80,
+	GPU_STAGE_HOST			= 0x100,
+	GPU_STAGE_ALL 			= 0x200
 };
 
 enum GPUHazard : u32
@@ -243,6 +245,7 @@ struct GPUIndexedIndirectCommand
 struct GPUProperties
 {
 	std::string device_name;
+	bool mesh_shader_support;
 };
 
 bool gpu_init();
@@ -302,6 +305,8 @@ void gpu_draw(const GPUCommandBuffer& cmd, void* data, u32 vertex_count, u32 ins
 void gpu_draw_indexed(const GPUCommandBuffer& cmd, void* data, u32 index_count, u32 instance_count, u32 base_index, u32 base_vertex, u32 base_instance);
 void gpu_draw_indirect(const GPUCommandBuffer& cmd, void* data, const GPUPointer& commands, u32 draw_count);
 void gpu_draw_indexed_indirect_count(const GPUCommandBuffer& cmd, void* data, const GPUPointer& commands, const GPUPointer& draw_count, u32 max_draw_count);
+void gpu_dispatch_mesh(const GPUCommandBuffer& cmd, void* data, uvec3 dim);
+void gpu_dispatch_mesh_indirect(const GPUCommandBuffer& cmd, void* data, const GPUPointer& dim);
 
 void gpu_swapchain_init(window_t wnd);
 GPUTexture gpu_swapchain_acquire_next(GPUSemaphore sem);

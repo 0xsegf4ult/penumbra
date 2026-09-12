@@ -59,6 +59,16 @@ physicsBody physics_create_body(const physicsBodyDesc& desc)
 	return b3CreateBody(world, &def);
 }
 
+void physics_destroy_body(physicsBody body)
+{
+	b3DestroyBody(body);
+}
+
+bool physics_body_is_valid(physicsBody body)
+{
+	return b3Body_IsValid(body);
+}
+
 static b3ShapeDef parse_shapedef(const physicsShapeDesc& desc)
 {
 	auto def = b3DefaultShapeDef();

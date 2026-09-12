@@ -1,5 +1,6 @@
 #pragma once
 
+#include <penumbra/ecs.hpp>
 #include <penumbra/math/transform.hpp>
 #include <penumbra/vfs.hpp>
 #include <penumbra/types.hpp>
@@ -94,5 +95,44 @@ struct PrefabFileFormat
 };
 
 void load_prefab(WorldState& world, const vfs_path& path);
+
+enum PrefabNodeFlags : u32
+{
+	PREFAB_NODE_STATIC = 0x1
+};
+
+enum PrefabComponentType
+{
+	PREFAB_COMPONENT_NULL,
+	PREFAB_COMPONENT_STATIC_MESH,
+	PREFAB_COMPONENT_SKINNED_MESH,
+	PREFAB_COMPONENT_DIRECTIONAL_LIGHT,
+	PREFAB_COMPONENT_POINT_LIGHT,
+	PREFAB_COMPONENT_SPOT_LIGHT,
+	PREFAB_COMPONENT_RIGIDBODY,
+	PREFAB_COMPONENT_SPHERE_COLLIDER,
+	PREFAB_COMPONENT_CAPSULE_COLLIDER,
+	PREFAB_COMPONENT_BOX_COLLIDER,
+	PREFAB_COMPONENT_HULL_COLLIDER,
+	PREFAB_COMPONENT_MESH_COLLIDER,
+	PREFAB_COMPONENT_COMPOUND_COLLIDER
+};
+
+struct PrefabFileFormat2
+{
+	constexpr static u32 fmt_magic = 0x42465050;
+       	constexpr static u32 fmt_major = 2u;
+	constexpr static u32 fmt_minor = 0u;
+
+	struct Header
+	{
+		u32 magic{fmt_magic};
+		u32 major{fmt_major};
+		u32 minor{fmt_minor};
+		u32 entity_count;
+	};
+};
+
+void export_prefab(WorldState& world, ecs::entity root, const vfs_path& path);
 
 }

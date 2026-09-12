@@ -1,6 +1,7 @@
 #include <world/prefab.hpp>
 #include <world/state.hpp>
 #include <world/components/render.hpp>
+#include <world/components/physics.hpp>
 #include <penumbra/math/transform.hpp>
 #include <penumbra/ecs.hpp>
 #include <penumbra/log.hpp>
@@ -11,6 +12,7 @@
 
 #include <cassert>
 #include <format>
+#include <fstream>
 #include <map>
 #include <vector>
 
@@ -153,6 +155,159 @@ void load_prefab(WorldState& world, const vfs_path& path)
 	}
 
 	vfs_close(pfile);
+}
+
+static void serialize_texture(ResourceID tex, std::ofstream& out)
+{
+	size_t plen = 0u;
+	if(!resource_get_handle(tex))
+	{
+		out.write((const char*)&plen, sizeof(u32));
+		return;
+	}
+
+	auto& tex_data = resource_manager_get_texture(tex);
+	vfs_path tex_path = vfs_path{"textures"} / tex_data.name;
+	plen = tex_path.string().length();
+	out.write((const char*)&plen, sizeof(u32));
+	out.write(tex_path.string().data(), plen);
+}
+
+struct prefab_exporter_context
+{
+	ecs::registry& entities;
+	std::ofstream& out;
+	u32 num_entities{0u};
+	std::map<ecs::entity, u32> entity_map;
+};
+
+static void export_entity(prefab_exporter_context& ctx, ecs::entity entity, u32 parent)
+{
+	ctx.entity_map[entity] = ctx.num_entities++;
+	
+	auto& name = ctx.entities.get<entity_name>(entity);
+	auto slen = name.length();
+	auto& ets = ctx.entities.get<Transform>(entity);
+
+	ctx.out.write((const char*)&slen, sizeof(u32));
+	ctx.out.write(name.data(), slen);
+	ctx.out.write((const char*)&parent, sizeof(u32));
+	ctx.out.write((const char*)&ets.translation, sizeof(vec3));
+	ctx.out.write((const char*)&ets.rotation, sizeof(Quaternion));
+	ctx.out.write((const char*)&ets.scale, sizeof(vec3));
+
+	PrefabComponentType ctype;
+	auto* robj = ctx.entities.try_get<render_object_component>(entity);
+	if(robj && resource_get_handle(robj->geometry))
+	{
+		ctype = PREFAB_COMPONENT_STATIC_MESH;
+		auto* skel = ctx.entities.try_get<render_skeleton_component>(entity);
+		if(skel && resource_get_handle(skel->skeleton))
+		{
+			ctype = PREFAB_COMPONENT_SKINNED_MESH;
+		}
+
+		ctx.out.write((const char*)&ctype, sizeof(u32));
+	
+		auto& geom_data = resource_manager_get_geometry(robj->geometry);
+		vfs_path geom_path = vfs_path{"meshes"} / geom_data.name;
+		auto plen = geom_path.string().length();
+		ctx.out.write((const char*)&plen, sizeof(u32));
+		ctx.out.write(geom_path.string().data(), plen);
+
+		size_t mplen = 0u;
+		if(resource_get_handle(robj->material))
+		{
+			auto& mtl_data = resource_manager_get_material(robj->material);
+			mplen = mtl_data.name.length();
+			ctx.out.write((const char*)&mplen, sizeof(u32));
+			ctx.out.write(mtl_data.name.data(), mplen);
+
+			ctx.out.write((const char*)&mtl_data.factors, sizeof(material_factors));
+			ctx.out.write((const char*)&mtl_data.flags, sizeof(u32));
+		
+			serialize_texture(mtl_data.albedo, ctx.out);
+			serialize_texture(mtl_data.mro, ctx.out);
+			serialize_texture(mtl_data.normalmap, ctx.out);
+			serialize_texture(mtl_data.emissive, ctx.out);
+
+			ctx.out.write((const char*)&mtl_data.clearcoat, sizeof(clearcoat_info));		
+		}
+		else
+		{
+			ctx.out.write((const char*)&mplen, sizeof(u32));
+		}
+
+		if(skel)
+		{
+			auto& skel_data = resource_manager_get_skeleton(skel->skeleton);
+			vfs_path skel_path = vfs_path{"anim"} / skel_data.name;
+			size_t splen = skel_path.string().length();
+			ctx.out.write((const char*)&splen, sizeof(u32));
+			ctx.out.write(skel_path.string().data(), splen);
+		}
+
+	}
+
+	auto* rb = ctx.entities.try_get<rigidbody_component>(entity);
+	if(rb)
+	{
+		ctype = PREFAB_COMPONENT_RIGIDBODY;
+		ctx.out.write((const char*)&ctype, sizeof(u32));
+
+		ctx.out.write((const char*)&rb->desc.type, sizeof(physicsBodyType));
+		ctx.out.write((const char*)&rb->desc.motion, sizeof(physicsMotionType));
+	}
+
+	auto* scol = ctx.entities.try_get<sphere_collider_component>(entity);
+	if(scol)
+	{
+		ctype = PREFAB_COMPONENT_SPHERE_COLLIDER;
+		ctx.out.write((const char*)&ctype, sizeof(u32));
+		ctx.out.write((const char*)&scol->desc, sizeof(physicsSphere));
+	}
+
+	auto* ccol = ctx.entities.try_get<capsule_collider_component>(entity);
+	if(ccol)
+	{
+		ctype = PREFAB_COMPONENT_CAPSULE_COLLIDER;
+		ctx.out.write((const char*)&ctype, sizeof(u32));
+		ctx.out.write((const char*)&ccol->desc, sizeof(physicsCapsule));
+	}
+
+	auto* bcol = ctx.entities.try_get<box_collider_component>(entity);
+	if(bcol)
+	{
+		ctype = PREFAB_COMPONENT_BOX_COLLIDER;
+		ctx.out.write((const char*)&ctype, sizeof(u32));
+		ctx.out.write((const char*)&bcol->half_size, sizeof(vec3));
+	}
+
+	ctype = PREFAB_COMPONENT_NULL;
+	ctx.out.write((const char*)&ctype, sizeof(u32));
+
+	ecs::entity cur = ctx.entities.get<entity_relationship>(entity).first_child;
+	while(ctx.entities.valid(cur))
+	{
+		export_entity(ctx, cur, ctx.entity_map[entity]);
+		cur = ctx.entities.get<entity_relationship>(cur).next_sibling;
+	}
+}
+
+void export_prefab(WorldState& world, ecs::entity root, const vfs_path& path)
+{
+	std::ofstream out{path, std::ios::binary};
+	prefab_exporter_context ctx{world.entities, out};
+	ctx.out.seekp(sizeof(PrefabFileFormat2::Header));
+
+	export_entity(ctx, root, 0u);
+
+	ctx.out.seekp(0);
+
+	PrefabFileFormat2::Header header{};
+	header.entity_count = ctx.num_entities;
+
+	ctx.out.write((const char*)&header, sizeof(PrefabFileFormat2::Header));
 }
 
 }

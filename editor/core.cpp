@@ -59,7 +59,6 @@ Editor::~Editor()
 void Editor::fixed_update(double dt)
 {
 	ZoneScoped;
-
 }
 
 void Editor::variable_update(double dt)

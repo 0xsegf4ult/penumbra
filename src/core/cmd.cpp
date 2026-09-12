@@ -8,9 +8,31 @@
 namespace penumbra
 {
 
-void console_print(const char* text)
+constexpr u32 cmd_max_sinks = 4;
+static cmd_sink_callback cmd_sinks[cmd_max_sinks];
+
+void console_print(std::string_view text)
 {
 	std::print("{}", text);
+	for(int i = 0; i < cmd_max_sinks; i++)
+	{
+		if(!cmd_sinks[i])
+			return;
+
+		cmd_sinks[i](text);
+	}
+}
+
+void cmd_register_output_sink(cmd_sink_callback callback)
+{
+	for(int i = 0; i < cmd_max_sinks; i++)
+	{
+		if(!cmd_sinks[i])
+		{
+			cmd_sinks[i] = callback;
+			return;
+		}
+	}
 }
 
 static int cmd_tokenize(std::string_view cmd_text, std::string_view* argv)
@@ -66,5 +88,6 @@ void cmd_executestring(std::string_view cmd_text)
 
 	console_print(std::format("Unknown command: {}\n", cmd_text).c_str());
 }
+
 
 }

@@ -85,6 +85,9 @@ void physics_shutdown();
 void physics_world_simulate(float dt, int substeps);
 
 physicsBody physics_create_body(const physicsBodyDesc& desc);
+void physics_destroy_body(physicsBody body);
+bool physics_body_is_valid(physicsBody body);
+
 physicsShape physics_create_sphere(physicsBody body, const physicsShapeDesc& desc, const physicsSphere& sphere);
 physicsShape physics_create_capsule(physicsBody body, const physicsShapeDesc& desc, const physicsCapsule& capsule);
 physicsShape physics_create_box(physicsBody body, const physicsShapeDesc& desc, vec3 half_sizes);

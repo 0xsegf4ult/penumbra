@@ -1,7 +1,7 @@
 add_executable(editor)
 
 target_include_directories(editor PRIVATE ${CMAKE_SOURCE_DIR}/external ${CMAKE_CURRENT_LIST_DIR})
-target_link_libraries(editor PUBLIC penumbra::modules PRIVATE fastgltf meshoptimizer ispc_texture_compressor)
+target_link_libraries(editor PUBLIC penumbra::engine PRIVATE fastgltf meshoptimizer ispc_texture_compressor)
 target_sources(editor PRIVATE
 	import/geometry.cpp
 	import/texture.cpp

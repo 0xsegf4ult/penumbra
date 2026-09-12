@@ -1,6 +1,7 @@
 #include <widgets/scenegraph.hpp>
 #include <widgets/widget.hpp>
 #include <world/state.hpp>
+#include <world/prefab.hpp>
 
 #include <penumbra/ecs.hpp>
 #include <penumbra/ui.hpp>
@@ -81,6 +82,10 @@ bool ScenegraphView::tree_draw(ecs::entity ent, u32& ctr)
 		if(ImGui::MenuItem("Delete"))
 			wants_delete = true;
 		ImGui::EndDisabled();
+		if(ImGui::MenuItem("Export"))
+		{
+			export_prefab(*world, ent, vfs_path{"export"} / graph.get<entity_name>(ent));
+		}
 
 		ImGui::EndPopup();
 	}

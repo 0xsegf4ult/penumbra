@@ -15,6 +15,32 @@ struct CSInput
 
 ConstantBuffer<CullingData> culling_data;
 
+float4 sphere_screen_extents(float3 pos, float rad, float projX, float projY)
+{
+	pos.z = -pos.z;
+	if(pos.z <= rad)
+		return float4(-1.0, -1.0, 1.0, 1.0);
+
+	float4 res;
+	float rad2 = rad * rad;
+	float d = pos.z * rad;
+
+	float hv = sqrt(pos.x * pos.x + pos.z * pos.z - rad2);
+	float ha = pos.x * hv;
+	float hb = pos.x * rad;
+	float hc = pos.z * hv;
+	res.x = (ha - d) * projX / (hc + hb);
+	res.z = (ha + d) * projX / (hc - hb);
+	
+	float vv = sqrt(pos.y * pos.y + pos.z * pos.z - rad2);
+	float va = pos.y * vv;
+	float vb = pos.y * rad;
+	float vc = pos.z * vv;
+	res.y = (va - d) * projY / (vc + vb);
+	res.w = (va + d) * projY / (vc - vb);
+	return res;
+}
+
 bool is_visible(float4 sphere, float radius, float3 cone, float cone_cutoff)
 {
 	bool visible = true;
@@ -43,6 +69,17 @@ bool is_visible(float4 sphere, float radius, float3 cone, float cone_cutoff)
 			visible = visible && dot(center, cone_axis) < cone_cutoff;
 		else
 			visible = visible && dot(center, cone_axis) < cone_cutoff * length(center) + radius;
+	}
+
+	float4 sph_ext = sphere_screen_extents(center, radius, culling_data.projX, culling_data.projY); 
+	if(visible && culling_data.flags & CullingFlags.ContributionCull)
+	{
+		float fW = abs(sph_ext.z - sph_ext.x);
+		float fH = abs(sph_ext.w - sph_ext.y);
+
+		visible = visible && any(sph_ext.xy <= 1.0f);
+		visible = visible && any(sph_ext.zw >= -1.0f);
+		visible = visible && (max(fW, fH) > culling_data.min_contrib);
 	}
 
 	return visible;

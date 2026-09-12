@@ -85,6 +85,7 @@ enum CullingFlags : uint
 {
 	FrustumCull,
 	ConeCull,
+	ContributionCull,
 	OcclusionCull,
 	IsOrtho
 };
@@ -98,7 +99,10 @@ struct CullingData
 	float lod_step;
 	float znear;
 	float zfar;
+	float projX;
+	float projY;
+	float min_contrib;	
 	CullingFlags flags;
-	uint lod_bias;	
+	uint lod_bias;
 };
 

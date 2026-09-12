@@ -12,7 +12,7 @@ option(PENUMBRA_BUILD_EDITOR "Build editor" ON)
 option(PENUMBRA_ENABLE_TRACY "Enable Tracy" OFF)
 
 add_subdirectory("external")
-add_subdirectory("modules")
+add_subdirectory("src")
 
 if(PENUMBRA_BUILD_TOOLS)
 	add_subdirectory("tools")

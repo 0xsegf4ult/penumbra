@@ -7,6 +7,7 @@
 #include <penumbra/ui.hpp>
 #include <penumbra/cvar.hpp>
 #include <penumbra/config.hpp>
+#include <penumbra/log.hpp>
 #include <penumbra/types.hpp>
 #include <renderer/bloom.hpp>
 #include <renderer/brdf.hpp>
@@ -210,6 +211,10 @@ void renderer_init(window_t wnd)
 	renderer_resource_state_init();
 	imgui_backend_init(renderer->window);
 
+	auto& gpu_props = gpu_get_properties();
+	if(!gpu_props.mesh_shader_support)
+		log::warn("renderer: mesh shaders not supported, using legacy path");
+
 	renderer_world_init();
 	renderer_create_view({.is_shadow = false});
 
@@ -265,6 +270,9 @@ void renderer_shutdown()
 void renderer_next_frame()
 {
 	ZoneScoped;
+
+	if(!renderer->output_rt)
+		renderer_update_render_resolution(wm_get_size(renderer->window));
 
 	if(renderer->render_resolution != renderer->last_render_resolution)
 	{

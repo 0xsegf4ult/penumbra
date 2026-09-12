@@ -12,6 +12,16 @@ void cvar_register(cvar_t* cvar)
 {
 	cvar->next = nullptr;
 
+	switch(cvar->type)
+	{
+	case CVAR_TYPE_INT:
+		cvar->int_v = cvar->int_defv;
+		break;
+	case CVAR_TYPE_FLOAT:
+		cvar->float_v = cvar->float_defv;
+		break;
+	};
+
 	if(cvar_get(cvar->name))
 		return;
 

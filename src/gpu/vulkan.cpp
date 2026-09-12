@@ -31,7 +31,7 @@ constexpr static std::array<const char*, 1> default_instance_extensions =
 	VK_EXT_DEBUG_UTILS_EXTENSION_NAME
 };
 
-constexpr static std::array<const char*, 2> device_extensions =
+constexpr static std::array<const char*, 2> default_device_extensions =
 {
 	VK_KHR_SWAPCHAIN_EXTENSION_NAME,
 	VK_EXT_EXTENDED_DYNAMIC_STATE_3_EXTENSION_NAME
@@ -364,6 +364,10 @@ static bool vulkan_create_device(std::span<VkPhysicalDevice> phys_devices, int i
 	gpu_context->props.device_name = std::string{props.properties.deviceName};
 	auto queue_ci = vulkan_device_create_queues();
 
+	std::vector<const char*> device_extensions;
+	for(auto ext : default_device_extensions)
+		device_extensions.push_back(ext);
+
 	u32 dev_ext_count = 0u;
        	vkEnumerateDeviceExtensionProperties(gpu_context->phys_device, nullptr, &dev_ext_count, nullptr);	
 	std::vector<VkExtensionProperties> dev_supported_ext(dev_ext_count);
@@ -371,6 +375,7 @@ static bool vulkan_create_device(std::span<VkPhysicalDevice> phys_devices, int i
 
 	bool has_ds3 = false;
 	bool has_unified_layouts = false;
+	bool has_mesh_shader = false;
 	for(auto& ext : dev_supported_ext)
 	{
 		if(!has_ds3 && std::strncmp(ext.extensionName, VK_EXT_EXTENDED_DYNAMIC_STATE_3_EXTENSION_NAME, VK_MAX_EXTENSION_NAME_SIZE) == 0)
@@ -378,6 +383,9 @@ static bool vulkan_create_device(std::span<VkPhysicalDevice> phys_devices, int i
 
 		if(!has_unified_layouts && std::strncmp(ext.extensionName, VK_KHR_UNIFIED_IMAGE_LAYOUTS_EXTENSION_NAME, VK_MAX_EXTENSION_NAME_SIZE) == 0)
 			has_unified_layouts = true;
+
+		if(!has_mesh_shader && std::strncmp(ext.extensionName, VK_EXT_MESH_SHADER_EXTENSION_NAME, VK_MAX_EXTENSION_NAME_SIZE) == 0)
+			has_mesh_shader = true;
 	}
 
 	if(!has_ds3)
@@ -388,11 +396,25 @@ static bool vulkan_create_device(std::span<VkPhysicalDevice> phys_devices, int i
 
 	if(!has_unified_layouts)
 		log::warn("gpu_vulkan: {} unsupported: performance might suffer!", VK_KHR_UNIFIED_IMAGE_LAYOUTS_EXTENSION_NAME);
+	else
+		device_extensions.push_back(VK_KHR_UNIFIED_IMAGE_LAYOUTS_EXTENSION_NAME);
+
+	if(has_mesh_shader)
+		device_extensions.push_back(VK_EXT_MESH_SHADER_EXTENSION_NAME);
+
+	gpu_context->props.mesh_shader_support = has_mesh_shader;
+
+	VkPhysicalDeviceMeshShaderFeaturesEXT msext
+	{
+		.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_FEATURES_EXT,
+		.pNext = nullptr,
+		.meshShader = true
+	};
 
 	VkPhysicalDeviceExtendedDynamicState3FeaturesEXT ds3ext
 	{
 		.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTENDED_DYNAMIC_STATE_3_FEATURES_EXT,
-		.pNext = nullptr,
+		.pNext = has_mesh_shader ? &msext : nullptr,
 		.extendedDynamicState3DepthClampEnable = true
 	};
 
@@ -1543,7 +1565,7 @@ GPUPipeline gpu_create_compute_pipeline(const ShaderIR& shader)
 	};
 }
 
-GPUPipeline gpu_create_graphics_pipeline(const ShaderIR& shader, const GPURasterDesc& raster)
+static GPUPipeline internal_create_graphics_pipeline(const ShaderIR& shader, const GPURasterDesc& raster, bool is_mesh)
 {
 	auto [layout, pdsl_handle] = shader_create_pipeline_layout(shader);
 	std::array<VkShaderModuleCreateInfo, max_shader_stages> sm_info;
@@ -1707,9 +1729,9 @@ GPUPipeline gpu_create_graphics_pipeline(const ShaderIR& shader, const GPURaster
 		.flags = 0,
 		.stageCount = num_stages,
 		.pStages = stages.data(),
-		.pVertexInputState = &vtxinput,
-		.pInputAssemblyState = &inputasm,
-		.pTessellationState = &tess_state,
+		.pVertexInputState = is_mesh ? nullptr : &vtxinput,
+		.pInputAssemblyState = is_mesh ? nullptr : &inputasm,
+		.pTessellationState = is_mesh ? nullptr : &tess_state,
 		.pViewportState = &viewport,
 		.pRasterizationState = &raster_state,
 		.pMultisampleState = &multisample,
@@ -1766,6 +1788,16 @@ void gpu_mem_copy(const GPUCommandBuffer& cmd, const GPUPointer& src, const GPUP
 	vkCmdCopyBuffer(std::bit_cast<VkCommandBuffer>(cmd.handle), src_buffer.handle, dst_buffer.handle, 1, &region);
 }
 
+GPUPipeline gpu_create_graphics_pipeline(const ShaderIR& shader, const GPURasterDesc& raster)
+{
+	return internal_create_graphics_pipeline(shader, raster, false);
+}
+
+GPUPipeline gpu_create_mesh_pipeline(const ShaderIR& shader, const GPURasterDesc& raster)
+{
+	return internal_create_graphics_pipeline(shader, raster, true);
+}
+
 void gpu_mem_clear(const GPUCommandBuffer& cmd, const GPUPointer& dst, size_t size)
 {
 	assert(dst.handle);
@@ -1819,9 +1851,47 @@ void gpu_copy_to_texture(const GPUCommandBuffer& cmd, const GPUPointer& src, GPU
 	}
 }
 
-void gpu_copy_from_texture(const GPUCommandBuffer& cmd, GPUTexture src, const GPUPointer& dst)
+void gpu_copy_from_texture(const GPUCommandBuffer& cmd, GPUTexture src, const GPUPointer& dst, u32 mips, u32 layers)
 {
+	assert(dst.handle);
+	auto& buffer = gpu_context->buffers[dst.handle - 1];
+	auto& texture = gpu_context->textures[src];
 
+	VkBufferImageCopy region
+	{
+		.bufferOffset = dst.offset,
+		.imageSubresource =
+		{
+			.aspectMask = format_to_vk_aspect(texture.format),
+			.mipLevel = 0,
+			.baseArrayLayer = 0,
+			.layerCount = layers
+		},
+		.imageOffset = {0, 0, 0},
+		.imageExtent = {texture.size.x, texture.size.y, texture.size.z}
+	};
+
+	for(u32 i = 0; i < mips; i++)
+	{
+		if(i > 0)
+		{
+			region.bufferOffset += gpu_format_size(texture.format, region.imageExtent.width, region.imageExtent.height, region.imageExtent.depth) * layers;
+			region.imageSubresource.mipLevel = i;
+			region.imageExtent.width = region.imageExtent.width > 1 ? region.imageExtent.width / 2 : 1u;
+			region.imageExtent.height = region.imageExtent.height > 1 ? region.imageExtent.height / 2 : 1u;
+			region.imageExtent.depth = region.imageExtent.depth > 1 ? region.imageExtent.depth / 2 : 1u;
+		}
+
+		vkCmdCopyImageToBuffer
+		(
+			std::bit_cast<VkCommandBuffer>(cmd.handle),
+			texture.handle,
+			VK_IMAGE_LAYOUT_GENERAL,
+			buffer.handle,
+			1u,
+			&region
+		);
+	}
 }
 
 void gpu_barrier(const GPUCommandBuffer& cmd, GPUStage src, GPUStage dst, GPUHazard hazards)
@@ -2190,7 +2260,6 @@ void gpu_bind_index_buffer(const GPUCommandBuffer& cmd, const GPUPointer& ibuf, 
 void gpu_draw(const GPUCommandBuffer& cmd, void* data, u32 vertex_count, u32 instance_count, u32 base_vertex, u32 base_instance)
 {
 	assert(cmd.bound_pipe);
-	assert(!cmd.bound_pipe->is_compute);
 	auto cb = std::bit_cast<VkCommandBuffer>(cmd.handle);
 
 	if(data && cmd.bound_pipe->pconst_size)
@@ -2202,7 +2271,6 @@ void gpu_draw(const GPUCommandBuffer& cmd, void* data, u32 vertex_count, u32 ins
 void gpu_draw_indexed(const GPUCommandBuffer& cmd, void* data, u32 index_count, u32 instance_count, u32 base_index, u32 base_vertex, u32 base_instance)
 {
 	assert(cmd.bound_pipe);
-	assert(!cmd.bound_pipe->is_compute);
 	auto cb = std::bit_cast<VkCommandBuffer>(cmd.handle);
 
 	if(data && cmd.bound_pipe->pconst_size)
@@ -2214,7 +2282,6 @@ void gpu_draw_indexed(const GPUCommandBuffer& cmd, void* data, u32 index_count, 
 void gpu_draw_indirect(const GPUCommandBuffer& cmd, void* data, const GPUPointer& commands, u32 draw_count)
 {
 	assert(cmd.bound_pipe);
-	assert(!cmd.bound_pipe->is_compute);
 	assert(commands.handle);
 	auto cb = std::bit_cast<VkCommandBuffer>(cmd.handle);
 	auto& commands_buffer = gpu_context->buffers[commands.handle - 1];
@@ -2229,7 +2296,6 @@ void gpu_draw_indirect(const GPUCommandBuffer& cmd, void* data, const GPUPointer
 void gpu_draw_indexed_indirect_count(const GPUCommandBuffer& cmd, void* data, const GPUPointer& commands, const GPUPointer& draw_count, u32 max_draw_count)
 {
 	assert(cmd.bound_pipe);
-	assert(!cmd.bound_pipe->is_compute);
 	assert(commands.handle);
 	assert(draw_count.handle);
 	auto cb = std::bit_cast<VkCommandBuffer>(cmd.handle);
@@ -2242,6 +2308,28 @@ void gpu_draw_indexed_indirect_count(const GPUCommandBuffer& cmd, void* data, co
 		vkCmdPushConstants(cb, std::bit_cast<VkPipelineLayout>(cmd.bound_pipe->layout), cmd.bound_pipe->pconst_stage, 0, cmd.bound_pipe->pconst_size, data);
 
 	vkCmdDrawIndexedIndirectCount(cb, commands_buffer.handle, commands.offset, draw_count_buffer.handle, draw_count.offset, max_draw_count, sizeof(GPUIndexedIndirectCommand));
+}
+
+void gpu_dispatch_mesh(const GPUCommandBuffer& cmd, void* data, uvec3 dim)
+{
+	assert(cmd.bound_pipe);
+	auto cb = std::bit_cast<VkCommandBuffer>(cmd.handle);
+	if(data && cmd.bound_pipe->pconst_size)
+		vkCmdPushConstants(cb, std::bit_cast<VkPipelineLayout>(cmd.bound_pipe->layout), cmd.bound_pipe->pconst_stage, 0, cmd.bound_pipe->pconst_size, data);
+
+	vkCmdDrawMeshTasksEXT(cb, dim.x, dim.y, dim.z);
+}
+
+void gpu_dispatch_mesh_indirect(const GPUCommandBuffer& cmd, void* data, const GPUPointer& dim, u32 draw_count)
+{
+	assert(cmd.bound_pipe);
+	assert(dim.handle);
+	auto cb = std::bit_cast<VkCommandBuffer>(cmd.handle);
+	auto& dim_buffer = gpu_context->buffers[dim.handle - 1];
+	if(data && cmd.bound_pipe->pconst_size)
+		vkCmdPushConstants(cb, std::bit_cast<VkPipelineLayout>(cmd.bound_pipe->layout), cmd.bound_pipe->pconst_stage, 0, cmd.bound_pipe->pconst_size, data);
+
+	vkCmdDrawMeshTasksIndirectEXT(cb, dim_buffer.handle, dim.offset, draw_count, sizeof(uvec3)); 
 }
 
 static VkSurfaceFormatKHR choose_swapchain_format(std::span<VkSurfaceFormatKHR> formats)
@@ -2278,7 +2366,10 @@ static VkExtent2D find_swapchain_extent(const VkSurfaceCapabilitiesKHR& caps)
 
 static u32 determine_image_count(const VkSurfaceCapabilitiesKHR& caps)
 {
-	u32 count = caps.minImageCount + 1;
+	u32 count = 3;
+	if(caps.minImageCount > 0 && caps.minImageCount > count)
+		count = caps.minImageCount;
+
 	if(caps.maxImageCount > 0 && count > caps.maxImageCount)
 		count = caps.maxImageCount;
 
