@@ -61,7 +61,22 @@ float3 fresnelSchlick(float HdotV, float3 f0)
 	return f0 + (1.0 - f0) * pow5(1.0 - HdotV);
 }
 
-float F_Schlick(float f0, float f90, float HdotV)
+float3 F_Schlick(float3 f0, float f90, float u)
 {
-	return f0 + (f90 - f0) * pow5(1.0 - HdotV);
+	return f0 + (f90 - f0) * pow5(1.0 - u);
+}
+
+float V_SmithGGXCorrelated(float NdotL, float NdotV, float alphaG)
+{
+	float alphaG2 = alphaG * alphaG;
+	float ggxV = NdotL * sqrt((-NdotV * alphaG2 + NdotV) * NdotV + alphaG2);
+	float ggxL = NdotV * sqrt((-NdotL * alphaG2 + NdotL) * NdotL + alphaG2);
+	return 0.5 / (ggxV + ggxL);
+}
+
+float D_GGX(float NdotH, float m)
+{
+	float m2 = m * m;
+	float f = (NdotH * m2 - NdotH) * NdotH + 1.0;
+	return m2 / (f * f);
 }

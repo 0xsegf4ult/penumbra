@@ -10,6 +10,25 @@ float2 signNotZero(float2 v)
 	return float2(signNotZero(v.x), signNotZero(v.y));
 }
 
+float2 pack_float3_octahedron(float3 v)
+{
+	float invl1norm = rcp(abs(v.x) + abs(v.y) + abs(v.z));
+	float2 proj;
+
+	if(v.z < 0.0f)
+	{
+		proj.x = (1.0 - abs(v.y * invl1norm)) * signNotZero(v.x);
+		proj.y = (1.0 - abs(v.x * invl1norm)) * signNotZero(v.y);
+	}
+	else
+	{
+		proj.x = v.x * invl1norm;
+		proj.y = v.y * invl1norm;
+	}
+
+	return proj * 0.5 + 0.5;
+}
+
 uint float3_to_oct(float3 v)
 {
 	float invl1norm = rcp(abs(v.x) + abs(v.y) + abs(v.z));
@@ -27,6 +46,16 @@ uint float3_to_oct(float3 v)
 	}
 
 	return packSnorm2x16(proj);
+}
+
+float3 unpack_octahedron(float2 p)
+{
+	p = p * 2.0 - 1.0;
+	float3 vn = float3(p.xy, 1.0 - abs(p.x) - abs(p.y));
+	if(vn.z < 0.0)
+		vn.xy = (1.0 - abs(p.yx)) * signNotZero(p.xy);
+	
+	return normalize(vn);
 }
 
 float3 oct_to_float3(uint p)

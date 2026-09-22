@@ -70,27 +70,24 @@ float filterPCF(uint sm_index, float4 posLS, float2 svpos)
 
 struct Surface
 {
-	float3 V;
 	float3 N;
-	float3 g_normal;
-	float3 wpos;
-
-	float roughness;
 	float metallic;
-	float reflectance;
-
-	float NdotV;
-
 	float3 diffuse;
+	float roughness;
+	float3 V;
+	float NdotV;
 	float3 f0;
-	float3 f90;
+	float f90;
+	float3 wpos;
+	float linear_roughness;
+	float3 g_normal;
 
 	float clearcoat_factor;
 	float clearcoat_roughness;	
 	float3 clearcoat_fresnel;
 	bool has_clearcoat = false;
 };
-
+/*
 float3 calculate_point_lighting(uint i, Surface surface)
 {
 	float3 L = consts.point_lights[i].pos_ic.xyz - surface.wpos;
@@ -140,10 +137,9 @@ float3 calculate_spot_lighting(uint i, Surface surface)
 	float3 luminance = consts.spot_lights[i].color_rad.rgb * intensity * NdotL;
 	return (surface.diffuse + specular_contrib) * luminance;
 }
-
+*/
 float3 calculate_direct_lighting(Surface surface, float depth, float2 svpos)
 {
-	float shadow = 1.0;
 	uint cascadeIndex = 0;
 	for(uint i = 0; i < 2; i++)
 	{
@@ -153,37 +149,38 @@ float3 calculate_direct_lighting(Surface surface, float depth, float2 svpos)
 
 	float3 L = normalize(-consts.light_direction.xyz);
 	float NdotL = saturate(dot(surface.N, L));
-	float4 sm_samplePos = float4(surface.wpos, 1.0) + (float4(surface.g_normal, 0.0) * dot(surface.g_normal, L) * consts.csm_nbias);
-	if(NdotL > 0.01)
-		shadow = filterPCF(cascadeIndex, mul(sm_samplePos, consts.smap_data[cascadeIndex]), svpos);
+	float3 sm_samplePos = surface.wpos + (surface.g_normal * dot(surface.g_normal, L) * consts.csm_nbias);
+	if(NdotL < 0.01)
+		return float3(0.0f);		
+
+	float shadow = filterPCF(cascadeIndex, mul(float4(sm_samplePos, 1.0), consts.smap_data[cascadeIndex]), svpos);
 
 	float3 H = normalize(surface.V + L);
-	float NdotH = dot(surface.N, H);
-	
-	float NDF = DistributionGGX(max(NdotH, 0.0), surface.roughness);
-	float G = GeometrySmith(surface.NdotV, NdotL, surface.roughness);
-	float3 F = fresnelSchlick(saturate(dot(H, surface.V)), surface.f0);
-	
-	float3 specular_contrib = NDF * G * F;
+	float NdotH = saturate(dot(surface.N, H));
+	float LdotH = saturate(dot(L, H));
 
+	float3 F = F_Schlick(surface.f0, surface.f90, LdotH);
+	float Vis = V_SmithGGXCorrelated(surface.NdotV, NdotL, surface.linear_roughness);
+	float D = D_GGX(NdotH, surface.linear_roughness);
+	float3 spec = D * F * Vis / float.getPi();
+	
 	float3 luminance = consts.light_color.rgb * NdotL;
 
-// lambert
-//	float3 diffuse = surface.diffuse / float.getPi();
-//
-	float LdotH = dot(L, H);
-	float f90 = 0.5 + 2.0 * surface.roughness * LdotH * LdotH;
-	float l_scatter = F_Schlick(1.0, f90, NdotL);
-	float v_scatter = F_Schlick(1.0, f90, surface.NdotV);
-	float3 diffuse = surface.diffuse * l_scatter * v_scatter * (1.0 / float.getPi());	
-
-	float3 brdf = diffuse + specular_contrib;
+	float energy_bias = lerp(0.0, 0.5, surface.linear_roughness);
+	float energy_factor = lerp(1.0, 1.0 / 1.51, surface.linear_roughness);
+	float3 f0 = float3(1.0);
+	float f90 = energy_bias + 2.0 * surface.linear_roughness * LdotH * LdotH;
+	float l_scatter = F_Schlick(f0, f90, NdotL).r;
+	float v_scatter = F_Schlick(f0, f90, surface.NdotV).r;
+	float3 diffuse = surface.diffuse * l_scatter * v_scatter * energy_factor * (1.0 / float.getPi());	
+	
+	float3 brdf = diffuse + spec;
 	if(surface.has_clearcoat)
 	{
 		float c_NdotL = saturate(dot(surface.g_normal, L));
 		float c_NdotV = saturate(dot(surface.g_normal, surface.V));
 		float c_NdotH = saturate(dot(surface.g_normal, H));
-		float c_NDF = DistributionGGX(c_NdotH, surface.clearcoat_roughness);
+		float c_NDF = D_GGX(c_NdotH, surface.clearcoat_roughness);
 		float c_G = GeometrySmith(c_NdotV, c_NdotL, surface.clearcoat_roughness);
 		brdf = lerp(brdf, c_NdotL * float3(c_NDF * c_G), surface.clearcoat_factor * surface.clearcoat_fresnel);	
 	}
@@ -199,108 +196,127 @@ void computeMain(uint groupIndex : SV_GroupIndex, uint2 Gid : SV_GroupID, unifor
 	const uint2 invocation = remap_lane_8x8(groupIndex);
 	const uint2 pixel = Gid.xy * 8 + invocation.xy;
 
-	uint primitiveID = input.visbuffer.desc[pixel];
 	float2 svpos = pixel + float2(0.5);
 	float3 ray_origin = mul(screen_to_view(float4(svpos, 1.0, 1.0)), consts.inverse_view).xyz;
 	float3 far = mul(screen_to_view(float4(svpos, 1e-6, 1.0)), consts.inverse_view).xyz;
 	float3 ray_direction = normalize(far - ray_origin);
-	float3 far_dx = mul(screen_to_view(float4(svpos + float2(1.0, 0.0), 1e-6, 1.0)), consts.inverse_view).xyz;
-	float3 far_dy = mul(screen_to_view(float4(svpos + float2(0.0, 1.0), 1e-6, 1.0)), consts.inverse_view).xyz;
-	float3 ray_direction_quad_x = normalize(far_dx - ray_origin);
-	float3 ray_direction_quad_y = normalize(far_dy - ray_origin);
+	float3 ray_direction_quad_x = QuadReadAcrossX(ray_direction);
+	float3 ray_direction_quad_y = QuadReadAcrossY(ray_direction);
+	
+	if(pixel.x >= consts.res.x || pixel.y >= consts.res.y)
+		return;
+	
+	uint primitiveID = input.visbuffer.desc[pixel];
 
 	ResourceHandle<SamplerState> smp = {0u};
 	if(primitiveID == 0)
 	{
 		input.framebuffer.desc[pixel] = consts.prefiltered.desc->SampleLevel(smp.desc, ray_direction, 0) * consts.exposure * consts.ambient_factor;
+		return;
 	}
+	
 
 	float3 p0;
 	float3 p1;
 	float3 p2;
-	float2 uv0;
-	float2 uv1;
-	float2 uv2;
 	uint2 vn0;
 	uint2 vn1;
 	uint2 vn2;
 	float3x3 trs_invT;
 	uint material;
+	uint i0;
+	uint i1;
+	uint i2;
 
-	if(!(pixel.x >= consts.res.x || pixel.y >= consts.res.y || primitiveID == 0))
+	Surface surface = {};
+	
 	{
-
+	
 	uint triangleID = primitiveID & 0x7F;
 	uint meshletID = (primitiveID >> 7) - 1;
-
 	uint instance = input.instances[meshletID].renderable_index;
 	Ptr<GPUWorldRenderable, Access.Read> renderable = input.renderables + instance;
 	float4x4 trs = renderable->transform;
 	material = renderable->material_offset;
 	GeometryCluster cluster = input.clusters[input.instances[meshletID].meshlet_index];
-	uint i0 = uint(consts.ibuf[cluster.index_offset + renderable->geom_idx_offset + (3 * triangleID) + 0]) + cluster.vertex_offset + renderable->geom_vtx_offset;
-	uint i1 = uint(consts.ibuf[cluster.index_offset + renderable->geom_idx_offset + (3 * triangleID) + 1]) + cluster.vertex_offset + renderable->geom_vtx_offset;
-	uint i2 = uint(consts.ibuf[cluster.index_offset + renderable->geom_idx_offset + (3 * triangleID) + 2]) + cluster.vertex_offset + renderable->geom_vtx_offset;
+	i0 = uint(consts.ibuf[cluster.index_offset + renderable->geom_idx_offset + (3 * triangleID) + 0]) + cluster.vertex_offset + renderable->geom_vtx_offset;
+	i1 = uint(consts.ibuf[cluster.index_offset + renderable->geom_idx_offset + (3 * triangleID) + 1]) + cluster.vertex_offset + renderable->geom_vtx_offset;
+	i2 = uint(consts.ibuf[cluster.index_offset + renderable->geom_idx_offset + (3 * triangleID) + 2]) + cluster.vertex_offset + renderable->geom_vtx_offset;
 
 	p0 = mul(float4(consts.vertex_pos[i0], 1.0), trs).xyz;
 	p1 = mul(float4(consts.vertex_pos[i1], 1.0), trs).xyz;
 	p2 = mul(float4(consts.vertex_pos[i2], 1.0), trs).xyz;
-
-	uv0 = consts.vertex_uv[i0];
-	uv1 = consts.vertex_uv[i1];
-	uv2 = consts.vertex_uv[i2];
-
-	vn0 = consts.vertex_nor_tan[i0];
-	vn1 = consts.vertex_nor_tan[i1];
-	vn2 = consts.vertex_nor_tan[i2];
-
+	
 	trs_invT = float3x3(
 		cross(trs[1].xyz, trs[2].xyz),
 		cross(trs[2].xyz, trs[0].xyz),
 		cross(trs[0].xyz, trs[1].xyz)
 	);
-
-	MaterialPBR mtl = input.materials[material];
-
-	Surface surface = {};
 	
+	}
+
 	bool is_backface;
 	float hit_depth;
 	float2 bary = compute_barycentrics(ray_origin, ray_direction, p0, p1, p2, hit_depth, is_backface);
 	surface.wpos = ray_origin + ray_direction * hit_depth;
 	float4 tmp = mul(float4(surface.wpos, 1.0), consts.camera);
 	tmp.xyz /= tmp.w;
+	surface.V = normalize(consts.cam_pos.xyz - surface.wpos.xyz);
+
+	float2 uvs;
+	float2 uv_dx;
+	float2 uv_dy;
+
+	{	
+
+	float2 uv0 = consts.vertex_uv[i0];
+	float2 uv1 = consts.vertex_uv[i1];
+	float2 uv2 = consts.vertex_uv[i2];
+	
+	float2 bary_quad_x = compute_barycentrics(ray_origin, ray_direction_quad_x, p0, p1, p2);
+	float2 bary_quad_y = compute_barycentrics(ray_origin, ray_direction_quad_y, p0, p1, p2);
+	
+	uvs = attribute_at_bary(uv0, uv1, uv2, bary);
+	uv_dx = uvs - attribute_at_bary(uv0, uv1, uv2, bary_quad_x);
+	uv_dy = uvs - attribute_at_bary(uv0, uv1, uv2, bary_quad_y);
+	
+	}
+	
+	vn0 = consts.vertex_nor_tan[i0];
+	vn1 = consts.vertex_nor_tan[i1];
+	vn2 = consts.vertex_nor_tan[i2];
+
+	MaterialPBR mtl = input.materials[material];
 
 	float3 n0_raw = oct_to_float3(vn0.x);
 	float3 n1_raw = oct_to_float3(vn1.x);
 	float3 n2_raw = oct_to_float3(vn2.x);
+	float3 normal_raw;
 
+	{
 	float3 n0 = normalize(mul(n0_raw, trs_invT));
 	float3 n1 = normalize(mul(n1_raw, trs_invT));
 	float3 n2 = normalize(mul(n2_raw, trs_invT));
-	float3 normal_raw = attribute_at_bary(n0, n1, n2, bary); 
-
-	float2 bary_quad_x = compute_barycentrics(ray_origin, ray_direction_quad_x, p0, p1, p2);
-	float2 bary_quad_y = compute_barycentrics(ray_origin, ray_direction_quad_y, p0, p1, p2);
-
-	float2 uvs = attribute_at_bary(uv0, uv1, uv2, bary);
-	float2 uv_dx = uvs - attribute_at_bary(uv0, uv1, uv2, bary_quad_x);
-	float2 uv_dy = uvs - attribute_at_bary(uv0, uv1, uv2, bary_quad_y);
+	normal_raw = attribute_at_bary(n0, n1, n2, bary); 
+	}
 	
 	if(is_backface)
 		normal_raw = -normal_raw;
 	
 	ResourceHandle<SamplerState> smp_aniso = {SAMPLER_ANISO_REPEAT};
-	
-	surface.V = normalize(consts.cam_pos.xyz - surface.wpos);
 
 	float3 albedo = (mtl.albedo.valid() ? nonuniform(mtl.albedo.desc)->SampleGrad(smp_aniso.desc, uvs, uv_dx, uv_dy).xyz : float3(1.0)) * mtl.albedo_factor.xyz;
 	float3 emissive = (mtl.emissive.valid() ? nonuniform(mtl.emissive.desc)->SampleGrad(smp_aniso.desc, uvs, uv_dx, uv_dy).xyz : float3(1.0)) * mtl.emissive_factor.xyz;
-	float3 physical = mtl.mro.valid() ? nonuniform(mtl.mro.desc)->SampleGrad(smp_aniso.desc, uvs, uv_dx, uv_dy).xyz : float3(1.0, 1.0, 0.0);
 	
+	{
+	float3 physical = mtl.mro.valid() ? nonuniform(mtl.mro.desc)->SampleGrad(smp_aniso.desc, uvs, uv_dx, uv_dy).xyz : float3(1.0, 1.0, 0.0);
+	surface.roughness = physical.r * mtl.roughness_factor;
+	surface.metallic = physical.g * mtl.metallic_factor;
+	}
+
 	surface.g_normal = normalize(normal_raw);
 
-	if(mtl.normalmap.valid() && dot(surface.V, surface.V) < 3000)
+	if(mtl.normalmap.valid())
 	{
 		float2 normalmap = nonuniform(mtl.normalmap.desc)->SampleGrad(smp_aniso.desc, uvs, uv_dx, uv_dy).xy;
 		
@@ -314,32 +330,25 @@ void computeMain(uint groupIndex : SV_GroupIndex, uint2 Gid : SV_GroupID, unifor
 		float4 tangent = attribute_at_bary(tan0, tan1, tan2, bary);
 
 		float3 bitangent = tangent.w * cross(normal_raw, tangent.xyz);
-		float3 nmap_val = decompress_bc5n((normalmap * 2.0 - 1.0) * mtl.normal_factor);
+		float3 nmap_val = decompress_bc5n((normalmap * 2.0 - 1.0));
+		nmap_val.xy *= mtl.normal_factor;
 		surface.N = normalize(mul(nmap_val, float3x3(tangent.xyz, bitangent, normal_raw)));
 	}
 	else
 		surface.N = surface.g_normal;	
 
-	surface.roughness = physical.r * mtl.roughness_factor;
-	surface.metallic = physical.g * mtl.metallic_factor;
-	
-	float NdotV = dot(surface.N, surface.V);
-	surface.N += (2.0 * saturate(-NdotV)) * surface.V;
+	surface.NdotV = max(dot(surface.N, surface.V), 1e-5);
 
 	float3 amb_IRR = consts.irradiance.desc->SampleLevel(smp.desc, surface.N, 0) * consts.ambient_factor;
 
-	surface.NdotV = dot(surface.N, surface.V);
-
-	float3 l0 = float3(0.0);
-	
-	surface.reflectance = 0.16 * mtl.reflectivity * mtl.reflectivity;
+	float reflectance = 0.16 * mtl.reflectivity * mtl.reflectivity;
 	surface.diffuse = ((1.0 - surface.metallic) * albedo);
 	
-	surface.f0 = float3(surface.reflectance * (1.0 - surface.metallic)) + albedo * surface.metallic;
-	surface.f90 = saturate(50.0 * surface.f0);
+	surface.f0 = float3(reflectance * (1.0 - surface.metallic)) + albedo * surface.metallic;
+	surface.f90 = saturate(50.0 * dot(surface.f0, float3(0.33, 0.33, 0.33)));
 
 	ResourceHandle<SamplerState> smp_clamp = {SAMPLER_LINEAR_CLAMP};
-	float2 envBRDF = consts.brdf.desc->SampleLevel(smp_clamp.desc, float2(max(surface.NdotV, 0.0), surface.roughness), 0);
+	float2 envBRDF = consts.brdf.desc->SampleLevel(smp_clamp.desc, float2(surface.NdotV, surface.roughness), 0);
 
 	float3 reflection = reflect(-surface.V, surface.N);
 	float3 amb_PFC = consts.prefiltered.desc->SampleLevel(smp.desc, reflection, surface.roughness * 8.0) * consts.ambient_factor;
@@ -349,19 +358,21 @@ void computeMain(uint groupIndex : SV_GroupIndex, uint2 Gid : SV_GroupID, unifor
 	{
 		surface.has_clearcoat = true;
 		surface.clearcoat_factor = mtl.clearcoat_factor;
-		surface.clearcoat_roughness = mtl.clearcoat_roughness_factor;
-		surface.clearcoat_fresnel = fresnelSchlick(saturate(dot(surface.g_normal, surface.V)), float3(surface.reflectance)); 
+		surface.clearcoat_roughness = mtl.clearcoat_roughness_factor * mtl.clearcoat_roughness_factor;
+		surface.clearcoat_fresnel = fresnelSchlick(saturate(dot(surface.g_normal, surface.V)), float3(reflectance)); 
 		float3 cc_reflection = reflect(-surface.V, surface.g_normal);
-		clearcoat_ambpfc = consts.prefiltered.desc->SampleLevel(smp.desc, cc_reflection, surface.clearcoat_roughness * 8.0) * consts.ambient_factor;
+		clearcoat_ambpfc = consts.prefiltered.desc->SampleLevel(smp.desc, cc_reflection, mtl.clearcoat_roughness_factor * 8.0) * consts.ambient_factor;
 	}	
 
-	surface.roughness = max(surface.roughness, 0.045);
+	surface.linear_roughness = max(surface.roughness * surface.roughness, 0.045);
 
+	float3 l0 = float3(0.0);
+	
+/*
 	float depth_linear = tmp.z; 
 	uint zIndex = uint(max(log2(-depth_linear) * consts.cluster_scale + consts.cluster_bias, 0.0));
 	uint3 indices = uint3(uint2(svpos.xy / consts.cluster_sizes.xy), zIndex);
 	uint light_cluster = (LIGHT_CLUSTERS_X * LIGHT_CLUSTERS_Y) * indices.z + LIGHT_CLUSTERS_X * ((LIGHT_CLUSTERS_Y - 1) - indices.y) + indices.x;
-/*
 	Ptr<LightGrid, Access.ReadWrite> pl_grid = consts.point_light_grid + light_cluster;
 	for(uint i = 0; i < pl_grid->count; i++)
 	{
@@ -388,6 +399,4 @@ void computeMain(uint groupIndex : SV_GroupIndex, uint2 Gid : SV_GroupID, unifor
 	}
 
 	input.framebuffer.desc[pixel] = (ambient + l0 + emissive) * consts.exposure;
-
-	}
 }
