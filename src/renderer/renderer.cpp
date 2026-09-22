@@ -82,7 +82,6 @@ static cvar_t vb_debug
 	.name = "r_visbuffer_debug",
 	.type = CVAR_TYPE_INT,
 	.int_defv = 0,
-	.int_v = 0
 };
 
 static cvar_t pr_mode
@@ -90,7 +89,6 @@ static cvar_t pr_mode
 	.name = "r_present_mode",
 	.type = CVAR_TYPE_INT,
 	.int_defv = 2,
-	.int_v = 2,
 	.callback = set_pmode_cvar
 };
 
@@ -99,7 +97,6 @@ static cvar_t wnd_mode
 	.name = "r_fullscreen",
 	.type = CVAR_TYPE_INT,
 	.int_defv = 0,
-	.int_v = 0,
 	.callback = set_wndmode_cvar
 };
 
@@ -452,7 +449,7 @@ void renderer_process_frame(double dt)
 		{
 			{
 			.texture = renderer->cur_swapchain,
-			.load_op = GPU_LOAD_OP_CLEAR
+			.load_op = GPU_LOAD_OP_DONTCARE
 			}
 		}
 	});

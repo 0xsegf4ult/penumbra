@@ -24,8 +24,15 @@ enum render_bucket
 	RENDER_BUCKET_COUNT
 };
 
+enum render_light_type : u32
+{
+	RENDER_LIGHT_TYPE_POINT		= 0,
+	RENDER_LIGHT_TYPE_SPOT 		= 1,
+};
+
 using renderViewID = u32;
 using renderObjectID = u32;
+using renderLightID = u32;
 
 constexpr renderViewID RENDER_VIEW_DEFAULT{1};
 
@@ -67,6 +74,19 @@ struct render_object_desc
 	ResourceID skeleton{0u};
 };
 
+struct render_light_desc
+{
+	render_light_type type{RENDER_LIGHT_TYPE_POINT};
+	vec3 position{0.0f};
+	vec3 direction{0.0f, 0.0f, -1.0f};
+	vec3 color{1.0f};
+	float intensity{1.0f};
+	float radius{5.0f};
+	float inner_cone{42.5f};
+	float outer_cone{45.0f};
+	bool shadowcast{true};
+};
+
 struct visbuffer_data
 {
 	GPUTextureDescriptor* texture;
@@ -95,9 +115,14 @@ renderViewID renderer_create_view(const render_view_desc& desc);
 void renderer_update_view(renderViewID view, const render_camera_data& camera);
 renderObjectID renderer_world_insert_object(const render_object_desc& desc);
 void renderer_world_remove_object(renderObjectID object);
-void renderer_world_set_visible(renderObjectID object, bool visible);
+void renderer_world_set_object_visible(renderObjectID object, bool visible);
 void renderer_world_update_object(renderObjectID object, const mat4& transform);
 void renderer_world_update_skin(renderObjectID object, const mat4* bones, u16 count);
+
+renderLightID renderer_world_insert_light(const render_light_desc& desc);
+void renderer_world_update_light(renderLightID light, const render_light_desc& desc);
+void renderer_world_set_light_visible(renderLightID light, bool visible);
+void renderer_world_remove_light(renderLightID light);
 
 void renderer_hook_visbuffer(const visbuffer_hook& hook);
 

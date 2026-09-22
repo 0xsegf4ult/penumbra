@@ -15,7 +15,6 @@
 
 #include <algorithm>
 #include <cassert>
-#include <map>
 #include <vector>
 
 namespace penumbra
@@ -69,7 +68,15 @@ struct render_view
 
 enum renderobject_flags
 {
-	RENDER_OBJECT_DISABLED = 1
+	RENDER_OBJECT_DISABLED 	= 0x1,
+};
+
+enum renderlight_flags
+{
+	RENDER_LIGHT_POINT 	= 0x1, 
+	RENDER_LIGHT_SPOT 	= 0x2,
+	RENDER_LIGHT_DISABLED 	= 0x4,
+	RENDER_LIGHT_SHADOWCAST = 0x8 
 };
 
 struct render_object_data
@@ -84,6 +91,23 @@ struct render_object_data
 	u32 geom_idx_offset;
 	u32 geom_cluster_offset;
 	u32 flags;
+};
+
+struct render_light_data
+{
+	vec4 pos_ic; 
+	vec4 color_rad; 
+	vec4 dir_oc; 
+	u32 flags;
+	u32 unused[3];
+};
+
+struct render_object_meta
+{
+	render_bucket bucket{RENDER_BUCKET_DEFAULT};
+	u32 l0_cluster_count{0u};
+	bool skinned{false};
+	renderer_skinned_geometry_instance sg{};
 };
 
 struct GPUWorldMeshlet
@@ -111,19 +135,27 @@ struct render_world
 	u32 object_capacity = 16384u;
 	u32 object_count = 0u;
 
+	u32 light_capacity = 1024u;
+	u32 light_count = 0u;
+
 	std::vector<u64> id_alloc_bitmap;
+	std::vector<u64> light_id_alloc_bitmap;
 
 	GPUPointer host_objects;
 	GPUPointer objects;
 
+	GPUPointer host_lights;
+	GPUPointer lights;
+
 	std::vector<renderObjectID> dirty_objects;
+	std::vector<renderLightID> dirty_lights;
+
+	std::vector<render_object_meta> object_meta;
+
 	std::vector<render_view> views;
 	
 	u32 bucket_sizes[RENDER_BUCKET_COUNT];
 	u32 bucket_offsets[RENDER_BUCKET_COUNT];
-
-	//FIXME: sparse set might be better?
-	std::map<renderObjectID, renderer_skinned_geometry_instance> sg_instances;
 };
 
 static render_world* world = nullptr;;
@@ -195,9 +227,18 @@ void renderer_world_init()
 	world->host_objects = gpu_allocate_memory(sizeof(render_object_data) * world->object_capacity, GPU_MEMORY_HOST, GPU_BUFFER_UPLOAD);
 	world->objects = gpu_allocate_memory(sizeof(render_object_data) * world->object_capacity);
 
+	world->host_lights = gpu_allocate_memory(sizeof(render_light_data) * world->light_capacity, GPU_MEMORY_HOST, GPU_BUFFER_UPLOAD);
+	world->lights = gpu_allocate_memory(sizeof(render_light_data) * world->light_capacity);
+
 	world->id_alloc_bitmap.resize(world->object_capacity / 64);
 	for(auto& word : world->id_alloc_bitmap)
 		word = ~(0ull);
+
+	world->light_id_alloc_bitmap.resize(world->light_capacity / 64);
+	for(auto& word : world->light_id_alloc_bitmap)
+		word = ~(0ull);
+
+	world->object_meta.resize(world->object_capacity);
 }
 
 static void renderer_destroy_view(render_view& view)
@@ -221,6 +262,8 @@ void renderer_world_cleanup()
 	for(auto& view : world->views)
 		renderer_destroy_view(view);
 
+	gpu_free_memory(world->lights);
+	gpu_free_memory(world->host_lights);
 	gpu_free_memory(world->objects);
 	gpu_free_memory(world->host_objects);
 	
@@ -326,23 +369,95 @@ render_bucket determine_bucket(u32 mtl_flags)
 	return RENDER_BUCKET_DEFAULT;
 }
 
-renderObjectID renderer_world_insert_object(const render_object_desc& desc)
+static u32 id_alloc_slot(std::vector<u64>& bitmap)
 {
-	ZoneScoped;
-
-	u32 index = 0;
-
-	for(size_t i = 0; i < world->id_alloc_bitmap.size(); i++)
+	for(size_t i = 0; i < bitmap.size(); i++)
 	{
-		u64 word = world->id_alloc_bitmap[i];
+		u64 word = bitmap[i];
 		if(word == 0)
 			continue;
 
 		int bit = __builtin_ctzll(word);
-		world->id_alloc_bitmap[i] &= ~(1ull << bit);
-		index = (i * 64 + bit) + 1;
-		break;
+		bitmap[i] &= ~(1ull << bit);
+		return static_cast<u32>(i * 64 + bit) + 1;
 	}
+
+	return 0;
+}
+
+static bool id_slot_live(const std::vector<u64>& bitmap, u32 index)
+{
+	u32 raw = index - 1;
+	return ((bitmap[raw / 64] >> (raw % 64)) & 1ull) == 0;
+}
+
+static void id_free_slot(std::vector<u64>& bitmap, u32 index)
+{
+	u32 raw = index - 1;
+	bitmap[raw / 64] |= (1ull << (raw % 64));
+}
+
+static bool object_handle_valid(renderObjectID object)
+{
+	return object && object <= world->object_capacity && id_slot_live(world->id_alloc_bitmap, object);
+}
+
+static render_object_data* object_slot(renderObjectID object)
+{
+	if(!object_handle_valid(object))
+	{
+		log::warn("render_world: invalid object handle [{}]", object);
+		return nullptr;
+	}
+
+	return reinterpret_cast<render_object_data*>(gpu_map_memory(world->host_objects)) + (object - 1);
+}
+
+static bool light_handle_valid(renderLightID light)
+{
+	return light && light <= world->light_capacity && id_slot_live(world->light_id_alloc_bitmap, light);
+}
+
+static render_light_data* light_slot(renderLightID light)
+{
+	if(!light_handle_valid(light))
+	{
+		log::warn("render_world: invalid light handle [{}]", light);
+		return nullptr;
+	}
+
+	return reinterpret_cast<render_light_data*>(gpu_map_memory(world->host_lights)) + (light - 1);
+}
+
+static bool light_desc_valid(const render_light_desc& desc)
+{
+	if(desc.type != RENDER_LIGHT_TYPE_POINT && desc.type != RENDER_LIGHT_TYPE_SPOT)
+	{
+		log::warn("render_world: invalid light type [{}]", static_cast<u32>(desc.type));
+		return false;
+	}
+
+	return true;
+}
+
+static render_light_data pack_light(const render_light_desc& desc)
+{
+	const bool is_spot = desc.type == RENDER_LIGHT_TYPE_SPOT;
+
+	render_light_data data{};
+	data.pos_ic = vec4{desc.position, is_spot ? desc.inner_cone : 0.0f};
+	data.color_rad = vec4{desc.color * desc.intensity, desc.radius};
+	data.dir_oc = vec4{is_spot ? desc.direction : vec3{0.0f}, is_spot ? desc.outer_cone : 0.0f};
+	data.flags = static_cast<u32>(desc.type) | (desc.shadowcast ? RENDER_LIGHT_SHADOWCAST : 0u);
+
+	return data;
+}
+
+renderObjectID renderer_world_insert_object(const render_object_desc& desc)
+{
+	ZoneScoped;
+
+	u32 index = id_alloc_slot(world->id_alloc_bitmap);
 
 	if(!index)
 	{
@@ -354,6 +469,8 @@ renderObjectID renderer_world_insert_object(const render_object_desc& desc)
 		world->object_count = index;
 
 	render_object_data* obj = reinterpret_cast<render_object_data*>(gpu_map_memory(world->host_objects)) + (index - 1);
+	auto& meta = world->object_meta[index - 1];
+	meta = render_object_meta{};
 	
 	renderObjectID handle{index};
 	world->dirty_objects.push_back(handle);
@@ -371,7 +488,8 @@ renderObjectID renderer_world_insert_object(const render_object_desc& desc)
 	{
 		auto sg_instance = renderer_geometry_instantiate_skin(vtx_offset, geom_data.vertex_count, resource_manager_get_skeleton(desc.skeleton).bone_count);
 		vtx_offset = sg_instance.vertex_offset;
-		world->sg_instances[handle] = sg_instance;
+		meta.skinned = true;
+		meta.sg = sg_instance;
 	}
 
 	obj->sphere = geom_data.sphere;
@@ -390,6 +508,9 @@ renderObjectID renderer_world_insert_object(const render_object_desc& desc)
 	obj->geom_cluster_offset = geom_data.cluster_offset;
 	obj->flags = 0;
 
+	meta.bucket = bucket;
+	meta.l0_cluster_count = geom_data.l0_cluster_count;
+
 	world->bucket_sizes[bucket] += geom_data.l0_cluster_count;
 
 	return handle;	
@@ -399,9 +520,10 @@ void renderer_world_update_object(renderObjectID object, const mat4& transform)
 {
 	ZoneScoped;
 
-	assert(object);
+	auto* data = object_slot(object);
+	if(!data)
+		return;
 
-	auto* data = reinterpret_cast<render_object_data*>(gpu_map_memory(world->host_objects)) + (object - 1);
 	data->transform = transform;
 	const vec3 scale = {transform.row(0u).magnitude(), transform.row(1u).magnitude(), transform.row(2u).magnitude()};
 	data->cull_scale = std::max(std::max(std::abs(scale.x), std::abs(scale.y)), std::abs(scale.z));
@@ -409,11 +531,12 @@ void renderer_world_update_object(renderObjectID object, const mat4& transform)
 	world->dirty_objects.push_back(object);
 }
 
-void renderer_world_set_visible(renderObjectID object, bool visible)
+void renderer_world_set_object_visible(renderObjectID object, bool visible)
 {
-	assert(object);
-	
-	auto* data = reinterpret_cast<render_object_data*>(gpu_map_memory(world->host_objects)) + (object - 1);
+	auto* data = object_slot(object);
+	if(!data)
+		return;
+
 	if(visible)
 		data->flags &= (~RENDER_OBJECT_DISABLED);
 	else
@@ -424,33 +547,116 @@ void renderer_world_set_visible(renderObjectID object, bool visible)
 
 void renderer_world_remove_object(renderObjectID object)
 {
-	renderer_world_set_visible(object, false);
+	auto* data = object_slot(object);
+	if(!data)
+		return;
+
+	data->flags |= RENDER_OBJECT_DISABLED;
+	world->dirty_objects.push_back(object);
+
+	auto& meta = world->object_meta[object - 1];
+	world->bucket_sizes[meta.bucket] -= meta.l0_cluster_count;
+	meta.skinned = false;
 
 	if(object == world->object_count)
 		world->object_count--;
 
-	u32 raw = object - 1;
-	u32 map_offset = raw / 64;
-	u32 bit_offset = raw % 64;
-	world->id_alloc_bitmap[map_offset] |= (1ull << bit_offset);
+	id_free_slot(world->id_alloc_bitmap, object);
 }
 
 void renderer_world_update_skin(renderObjectID object, const mat4* bones, u16 count)
 {
 	ZoneScoped;
 
-	assert(object);
+	if(!object_handle_valid(object))
+	{
+		log::warn("render_world: invalid object handle [{}]", object);
+		return;
+	}
 
-	auto& data = world->sg_instances[object];
-	renderer_write_bones(data.bone_offset, bones, count);
+	auto& meta = world->object_meta[object - 1];
+	if(!meta.skinned)
+		return;
+
+	renderer_write_bones(meta.sg.bone_offset, bones, count);
+}
+
+renderLightID renderer_world_insert_light(const render_light_desc& desc)
+{
+	ZoneScoped;
+
+	if(!light_desc_valid(desc))
+		return renderLightID{0};
+
+	u32 index = id_alloc_slot(world->light_id_alloc_bitmap);
+
+	if(!index)
+	{
+		log::warn("render_world: light storage capacity [{}] exceeded", world->light_capacity);
+		return renderLightID{0};
+	}
+
+	if(index > world->light_count)
+		world->light_count = index;
+
+	auto* slot = reinterpret_cast<render_light_data*>(gpu_map_memory(world->host_lights)) + (index - 1);
+	*slot = pack_light(desc);
+
+	world->dirty_lights.push_back(index);
+
+	return renderLightID{index};
+}
+
+void renderer_world_update_light(renderLightID light, const render_light_desc& desc)
+{
+	ZoneScoped;
+
+	if(!light_desc_valid(desc))
+		return;
+
+	auto* slot = light_slot(light);
+	if(!slot)
+		return;
+
+	const u32 disabled = slot->flags & RENDER_LIGHT_DISABLED;
+	*slot = pack_light(desc);
+	slot->flags |= disabled;
+
+	world->dirty_lights.push_back(light);
+}
+
+void renderer_world_set_light_visible(renderLightID light, bool visible)
+{
+	auto* slot = light_slot(light);
+	if(!slot)
+		return;
+
+	if(visible)
+		slot->flags &= ~RENDER_LIGHT_DISABLED;
+	else
+		slot->flags |= RENDER_LIGHT_DISABLED;
+
+	world->dirty_lights.push_back(light);
+}
+
+void renderer_world_remove_light(renderLightID light)
+{
+	auto* slot = light_slot(light);
+	if(!slot)
+		return;
+
+	slot->flags |= RENDER_LIGHT_DISABLED;
+	world->dirty_lights.push_back(light);
+
+	if(light == world->light_count)
+		world->light_count--;
+
+	id_free_slot(world->light_id_alloc_bitmap, light);
 }
 
 static void renderer_world_skinning(GPUCommandBuffer& cmd)
 {
 	ZoneScoped;
-
-	if(world->sg_instances.empty())
-		return;
 
 	auto geometry_storage = renderer_geometry_get_storage();
 	GPUDevicePointer skv = gpu_host_to_device_pointer(geometry_storage.vertex_skin);
@@ -470,8 +676,12 @@ static void renderer_world_skinning(GPUCommandBuffer& cmd)
 	} shader_data;
 
 	gpu_set_pipeline(cmd, skinning_cs);
-	for(auto& [obj, sm] : world->sg_instances)
+	for(auto& meta : world->object_meta)
 	{
+		if(!meta.skinned)
+			continue;
+
+		auto& sm = meta.sg;
 		shader_data.vertex_skinned = skv + (sm.vertex_skinned_offset * sizeof(geom_skinned_format));
 		shader_data.vertex_pos = vpos + (sm.vertex_offset * sizeof(geom_position_format));
 		shader_data.vertex_uv = vuv + (sm.vertex_offset * sizeof(geom_uv_format));
@@ -483,30 +693,57 @@ static void renderer_world_skinning(GPUCommandBuffer& cmd)
 	}
 }
 
+static bool upload_dirty_ranges(GPUCommandBuffer& cmd, const GPUPointer& host, const GPUPointer& device,
+	std::vector<u32>& dirty, u32 count, size_t stride)
+{
+	if(dirty.empty())
+		return false;
+
+	std::sort(dirty.begin(), dirty.end());
+	dirty.erase(std::unique(dirty.begin(), dirty.end()), dirty.end());
+
+	if(dirty.size() == static_cast<size_t>(count))
+	{
+		gpu_mem_copy(cmd, host, device, count * stride);
+		dirty.clear();
+		return true;
+	}
+
+	u32 run_start = dirty.front();
+	u32 run_end = run_start;
+
+	for(size_t i = 1; i < dirty.size(); i++)
+	{
+		const u32 id = dirty[i];
+		if(id == run_end + 1u)
+		{
+			run_end = id;
+			continue;
+		}
+
+		gpu_mem_copy(cmd, host + (run_start - 1u) * stride, device + (run_start - 1u) * stride, (run_end - run_start + 1u) * stride);
+		run_start = run_end = id;
+	}
+
+	gpu_mem_copy(cmd, host + (run_start - 1u) * stride, device + (run_start - 1u) * stride, (run_end - run_start + 1u) * stride);
+	dirty.clear();
+
+	return true;
+}
+
 void renderer_world_update(GPUCommandBuffer& cmd)
 {
 	ZoneScoped;
 
 	renderer_world_skinning(cmd);
 
-	if(world->dirty_objects.empty())
-		return;
+	bool copied = upload_dirty_ranges(cmd, world->host_objects, world->objects, world->dirty_objects,
+		world->object_count, sizeof(render_object_data));
+	copied |= upload_dirty_ranges(cmd, world->host_lights, world->lights, world->dirty_lights,
+		world->light_count, sizeof(render_light_data));
 
-	if(world->dirty_objects.size() == world->object_count)
-	{
-		gpu_mem_copy(cmd, world->host_objects, world->objects, world->object_count * sizeof(render_object_data));
-		world->dirty_objects.clear();
-		return;
-	}
-
-	for(auto handle : world->dirty_objects)
-	{
-		auto offset = (handle - 1) * sizeof(render_object_data);
-		gpu_mem_copy(cmd, world->host_objects + offset, world->objects + offset, sizeof(render_object_data));
-	}
-	world->dirty_objects.clear();
-
-	gpu_barrier(cmd, GPU_STAGE_TRANSFER, GPU_STAGE_COMPUTE | GPU_STAGE_VERTEX_SHADER);
+	if(copied)
+		gpu_barrier(cmd, GPU_STAGE_TRANSFER, GPU_STAGE_COMPUTE | GPU_STAGE_VERTEX_SHADER);
 }
 
 static void renderer_world_vis_prepare(GPUCommandBuffer& cmd)
@@ -623,6 +860,16 @@ void renderer_world_determine_visibility(GPUCommandBuffer& cmd)
 GPUPointer renderer_world_get_objects()
 {
 	return world->objects;
+}
+
+GPUPointer renderer_world_get_lights()
+{
+	return world->lights;
+}
+
+u32 renderer_world_get_light_count()
+{
+	return world->light_count;
 }
 
 render_bucket_draw renderer_world_get_drawcall(renderViewID id, render_bucket bucket)

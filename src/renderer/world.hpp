@@ -26,6 +26,8 @@ void renderer_world_cleanup();
 void renderer_world_update(GPUCommandBuffer& cmd);
 void renderer_world_determine_visibility(GPUCommandBuffer& cmd);
 GPUPointer renderer_world_get_objects();
+GPUPointer renderer_world_get_lights();
+u32 renderer_world_get_light_count();
 render_bucket_draw renderer_world_get_drawcall(renderViewID view, render_bucket bucket);
 render_bucket_mdi_draw renderer_world_get_mdi_drawcall(renderViewID view, render_bucket bucket);
 

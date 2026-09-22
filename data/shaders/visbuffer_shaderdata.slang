@@ -12,6 +12,7 @@ struct Light
 	float4 pos_ic;
 	float4 color_rad;
 	float4 dir_oc;
+	uint4 flags_unused;
 };
 
 struct LightCluster
@@ -56,7 +57,7 @@ struct VisbufferConstants
 	float cascade_splits[4];
 	ResourceHandle<Texture2D> cascade_rts[4];
 	Ptr<float4x4, Access.Read> smap_data;
-	Ptr<Light, Access.Read> point_lights;
+	Ptr<Light, Access.Read> lights;
 	Ptr<Light, Access.Read> spot_lights;
 	Ptr<LightCluster, Access.ReadWrite> light_clusters;
 	Ptr<uint32_t, Access.ReadWrite> light_counters;
@@ -65,7 +66,7 @@ struct VisbufferConstants
 	Ptr<LightGrid, Access.ReadWrite> point_light_grid;
 	Ptr<LightGrid, Access.ReadWrite> spot_light_grid;
 
-	uint32_t point_light_count;
+	uint light_count;
 	uint32_t spot_light_count;
 	float cluster_scale;
 	float cluster_bias;

@@ -20,6 +20,23 @@ struct GPUWorldRenderable
 	uint flags;
 };
 
+[Flags]
+enum LightFlags : uint
+{
+	PointLight,
+	SpotLight,
+	Disabled,
+	Shadowcast
+};
+
+struct GPUWorldLight
+{
+	float4 pos_ic;
+	float4 color_rad;
+	float4 dir_oc;
+	uint4 flags_unused;
+};
+
 struct GeometryLOD
 {
 	uint cluster_offset;

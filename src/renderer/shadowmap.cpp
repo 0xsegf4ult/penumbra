@@ -148,9 +148,9 @@ void renderer_shadow_update(render_shadow_data& data, const render_camera_data& 
 		vec3{1.0f, 1.0f, 0.0f},
 		vec3{1.0f, -1.0f, 0.0f},
 		vec3{-1.0f, -1.0f, 0.0f},
-		vec3{-1.0f, 1.0f, 1.0f},
-		vec3{1.0f, 1.0f, 1.0f},
-		vec3{1.0f, -1.0f, 1.0f},
+		vec3{-1.0f, 1.0f, -1.0f},
+		vec3{1.0f, 1.0f, -1.0f},
+		vec3{1.0f, -1.0f, -1.0f},
 		vec3{-1.0f, -1.0f, -1.0f}
 	};
 
