@@ -15,6 +15,9 @@
 namespace penumbra
 {
 
+static EnvironmentMap env_day;
+static EnvironmentMap env_night;
+
 void add_entity_as_child(ecs::registry& graph, ecs::entity parent, ecs::entity child)
 {
 	entity_relationship& re = graph.get<entity_relationship>(parent);
@@ -82,8 +85,9 @@ WorldState::WorldState()
 	add_entity_as_child(entities, root, env);
 	entities.emplace<directional_light_component>(env, vec3{-0.14f, -0.3f, -0.3f}, vec3{0.68f, 0.53f, 0.46f}, 38000.0f);
 
-	auto envmap = load_envmap("hdri/kloppenheim");
-	set_envmap(envmap);
+	env_day = load_envmap("hdri/kloppenheim");
+	env_night = load_envmap("hdri/kloppenheim_night");
+	set_night(false);
 }
 
 WorldState::~WorldState()
@@ -103,6 +107,26 @@ void WorldState::set_envmap(const EnvironmentMap& envmap)
 {
 	r_envmap.irradiance = resource_manager_get_texture(envmap.irradiance).descriptor;
 	r_envmap.prefiltered = resource_manager_get_texture(envmap.prefiltered).descriptor;
+}
+
+void WorldState::set_night(bool state)
+{
+	if(state)
+	{
+		set_envmap(env_night);
+		entities.get<directional_light_component>(env).color = vec3{0.53f, 0.57f, 0.78f};
+		entities.get<directional_light_component>(env).intensity = 1.0f;
+		ambient_intensity = 1.0f;
+	}
+	else
+	{
+		set_envmap(env_day);
+		entities.get<directional_light_component>(env).color = vec3{0.68f, 0.53f, 0.46f};
+		entities.get<directional_light_component>(env).intensity = 48000.0f;
+		ambient_intensity = 1200.0f;
+	}
+
+	night = state;
 }
 
 void WorldState::update_transforms()

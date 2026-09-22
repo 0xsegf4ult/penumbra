@@ -267,6 +267,26 @@ void Editor::menubar_draw()
 			ImGui::EndMenu();
 		}
 
+		if(ImGui::BeginMenu("World"))
+		{
+			bool is_night = world->night;
+			auto& camera = world->entities.get<camera_component>(world->main_camera);
+			if(is_night && ImGui::MenuItem("Set day"))
+			{
+				world->set_night(false);
+				camera.aperture = 8.0f;
+				camera.shutter_speed = 60.0f;
+			}
+			else if(!is_night && ImGui::MenuItem("Set night"))
+			{
+				world->set_night(true);
+				camera.aperture = 1.4f;
+				camera.shutter_speed = 2.0f;
+			}
+
+			ImGui::EndMenu();
+		}
+
 		if(ImGui::BeginMenu("Settings"))
 		{
 			if(ImGui::BeginMenu("Display"))
@@ -396,7 +416,7 @@ void Editor::update_env()
 		dlight.direction,
 		dlight.color,
 		dlight.intensity,
-		1200.0f,
+		world->ambient_intensity,
 		world->r_envmap
 	});
 }

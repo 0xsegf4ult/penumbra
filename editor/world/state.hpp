@@ -34,6 +34,7 @@ struct WorldState
 	void set_envmap(const EnvironmentMap& envmap);
 	void update_transforms();
 	void update_entity_subtree(ecs::entity entity, mat4 matrix_world);
+	void set_night(bool state);
 
 	ecs::registry entities;
 	ecs::entity root;
@@ -41,6 +42,8 @@ struct WorldState
 	ecs::entity main_camera;
 	ecs::entity env;
 	render_environment_map r_envmap;
+	float ambient_intensity;
+	bool night{false};
 };
 
 }
