@@ -861,10 +861,7 @@ GPUPointer gpu_allocate_memory(size_t size, GPUMemoryHeap heap, GPUBufferUsage u
 	VkBuffer buf;
 	auto status = vkCreateBuffer(gpu_context->device, &buffer_ci, nullptr, &buf);
 	if(status != VK_SUCCESS)
-	{
-		log::error("gpu_vulkan: failed to allocate memory: {}", string_VkResult(status));
-		return {0, 0};
-	}
+		panic(std::format("gpu: vkCreateBuffer failed: {}", string_VkResult(status)));
 
 	VkMemoryRequirements2 mem_req
 	{
@@ -905,17 +902,11 @@ GPUPointer gpu_allocate_memory(size_t size, GPUMemoryHeap heap, GPUBufferUsage u
 	VkDeviceMemory mem;
 	status = vkAllocateMemory(gpu_context->device, &alloc_chain, nullptr, &mem);
 	if(status != VK_SUCCESS)
-	{
-		log::error("gpu_vulkan: failed to allocate memory: {}", string_VkResult(status));
-		return {0, 0};
-	}
+		panic(std::format("gpu: vkAllocateMemory failed: {}", string_VkResult(status)));
 
 	status = vkBindBufferMemory(gpu_context->device, buf, mem, 0);
 	if(status != VK_SUCCESS)
-	{
-		log::error("gpu_vulkan: failed to allocate memory: {}", string_VkResult(status));
-		return {0, 0};
-	}
+		panic(std::format("gpu: vkBindBufferMemory failed: {}", string_VkResult(status)));
 
 	TracyAllocN(mem, size, heap_names[heap]);
 
@@ -1010,17 +1001,11 @@ GPUTexture gpu_create_texture(const GPUTextureDesc& desc)
 
 	auto status = vkGetPhysicalDeviceImageFormatProperties2(gpu_context->phys_device, &format_info, &format_props);
 	if(status != VK_SUCCESS)
-	{
-		log::error("gpu_vulkan: failed to create texture: {}", string_VkResult(status));
-		return GPUTexture{0u};
-	}
+		panic(std::format("gpu: vkGetPhysicalDeviceImageFormatProperties2 failed: {}", string_VkResult(status)));
 
 	status = vkCreateImage(gpu_context->device, &image_ci, nullptr, &handle);
 	if(status != VK_SUCCESS)
-	{
-		log::error("gpu_vulkan: failed to create texture: {}", string_VkResult(status));
-		return GPUTexture{0u};
-	}
+		panic(std::format("gpu: vkCreateImage failed: {}", string_VkResult(status)));
 
 	VkMemoryRequirements mem_req{};
 	vkGetImageMemoryRequirements(gpu_context->device, handle, &mem_req);
@@ -1042,19 +1027,13 @@ GPUTexture gpu_create_texture(const GPUTextureDesc& desc)
 
 	status = vkAllocateMemory(gpu_context->device, &alloc, nullptr, &memory);
 	if(status != VK_SUCCESS)
-	{
-		log::error("gpu_vulkan: failed to allocate texture memory: {}", string_VkResult(status));
-		return GPUTexture{0u};
-	}
+		panic(std::format("gpu: vkAllocateMemory failed: {}", string_VkResult(status)));
 
 	TracyAllocN(memory, alloc.allocationSize, heap_names[GPU_MEMORY_PRIVATE]);
 
 	status = vkBindImageMemory(gpu_context->device, handle, memory, 0);
 	if(status != VK_SUCCESS)
-	{
-		log::error("gpu_vulkan: failed to allocate texture memory: {}", string_VkResult(status));
-		return GPUTexture{0u};
-	}
+		panic(std::format("gpu: vkBindImageMemory failed: {}", string_VkResult(status)));
 
 	gpu_context->textures.push_back(GPUTextureData{handle, memory, desc.dim, desc.format});
 	return GPUTexture{static_cast<u32>(gpu_context->textures.size() - 1)};
@@ -1113,10 +1092,7 @@ static VkImageView get_or_create_image_view(GPUTextureData& tex, const GPUViewDe
 	VkImageView view;
 	auto result = vkCreateImageView(gpu_context->device, &view_ci, nullptr, &view);
 	if(result != VK_SUCCESS)
-	{
-		log::error("gpu_vulkan: failed to create texture descriptor: {}", string_VkResult(result));
-		return VK_NULL_HANDLE;
-	}
+		panic(std::format("gpu: vkCreateImageView failed: {}", string_VkResult(result)));
 
 	tex.views.push_back({view, desc});
 
@@ -1211,8 +1187,10 @@ GPUSampler gpu_create_sampler(const GPUSamplerDesc& desc)
 
 
 	VkSampler sampler;
-	vkCreateSampler(gpu_context->device, &sampler_ci, nullptr, &sampler);
-	
+	auto result = vkCreateSampler(gpu_context->device, &sampler_ci, nullptr, &sampler);
+	if(result != VK_SUCCESS)
+		panic(std::format("gpu: vkCreateSampler failed: {}", string_VkResult(result)));
+
 	const VkDescriptorImageInfo info
 	{
 		.sampler = sampler,
@@ -1288,9 +1266,14 @@ GPUCommandBuffer gpu_record_commands(GPUQueue queue)
 		.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
 		.commandBufferCount = 1
 	};
-	vkAllocateCommandBuffers(gpu_context->device, &alloc_info, &cmd);
+	auto result = vkAllocateCommandBuffers(gpu_context->device, &alloc_info, &cmd);
+	if(result != VK_SUCCESS)
+		panic(std::format("gpu: vkAllocateCommandBuffers failed: {}", string_VkResult(result)));
 
-	vkBeginCommandBuffer(cmd, &begin_info);
+	result = vkBeginCommandBuffer(cmd, &begin_info);
+	if(result != VK_SUCCESS)
+		panic(std::format("gpu: vkBeginCommandBuffer failed: {}", string_VkResult(result)));
+
 	return {thread, nullptr, std::bit_cast<u64>(cmd), {}, {}};
 }
 
@@ -1370,10 +1353,9 @@ u64 gpu_submit(GPUQueue queue, GPUCommandBuffer& cmd)
 		.pSignalSemaphoreInfos = emit_signals.data()
 	};
 
-	if(vkQueueSubmit2(qd.handle, 1u, &batch, nullptr) != VK_SUCCESS)
-	{
-		panic("gpu_vulkan: failed to submit command buffer");
-	}
+	auto result = vkQueueSubmit2(qd.handle, 1u, &batch, nullptr);
+        if(result != VK_SUCCESS)
+		panic(std::format("gpu: vkQueueSubmit2 failed: {}", string_VkResult(result)));
 
 	qd.cmd_pools[cmd.thread].buffers.push({cbuf, qd.timeline});
 	return qd.timeline;
@@ -1399,17 +1381,21 @@ bool gpu_wait_queue(GPUQueue queue, u64 timeline)
 	{
 		u64 g_val = 0;
 		vkGetSemaphoreCounterValue(gpu_context->device, gpu_context->queue_data[queue - 1].semaphore, &g_val);
-		log::error("gpu_vulkan: wait_queue timed out waiting for signal {:#x}, queue is {:#x}", timeline, g_val);
+		log::error("gpu: vkWaitSemaphores timed out waiting for signal {:#x}, queue is {:#x}", timeline, g_val);
 		return false;
 	}
-	
+	else if(result != VK_SUCCESS)
+		panic(std::format("gpu: vkWaitSemaphores failed: {}", string_VkResult(result)));
+
 	return true;
 }
 
 void gpu_wait_idle()
 {
 	ZoneScoped;
-	vkDeviceWaitIdle(gpu_context->device);
+	auto result = vkDeviceWaitIdle(gpu_context->device);
+	if(result != VK_SUCCESS)
+		panic(std::format("gpu: vkDeviceWaitIdle failed: {}", string_VkResult(result)));
 }
 
 GPUSemaphore gpu_create_semaphore(u64 initial_value, GPUSemaphoreType type)
@@ -1432,7 +1418,10 @@ GPUSemaphore gpu_create_semaphore(u64 initial_value, GPUSemaphoreType type)
 		sem_ci.pNext = nullptr;
 
 	VkSemaphore sem;
-	vkCreateSemaphore(gpu_context->device, &sem_ci, nullptr, &sem);
+	auto result = vkCreateSemaphore(gpu_context->device, &sem_ci, nullptr, &sem);
+	if(result != VK_SUCCESS)
+		panic(std::format("gpu: vkCreateSemaphore failed: {}", string_VkResult(result)));
+
 	gpu_context->semaphores.push_back(sem);
 	return GPUSemaphore{static_cast<u32>(gpu_context->semaphores.size())};
 }
@@ -1448,7 +1437,10 @@ u64 gpu_semaphore_read_counter(GPUSemaphore sem)
 	assert(sem);
 	
 	u64 val = 0;
-	vkGetSemaphoreCounterValue(gpu_context->device, gpu_context->semaphores[sem - 1], &val);
+	auto result = vkGetSemaphoreCounterValue(gpu_context->device, gpu_context->semaphores[sem - 1], &val);
+	if(result != VK_SUCCESS)
+		panic(std::format("gpu: vkGetSemaphoreCounterValue failed: {}", string_VkResult(result)));
+
 	return val;
 }
 
@@ -1473,7 +1465,10 @@ static VkDescriptorSetLayout shader_create_push_descriptor_set(const ShaderIR::C
 	};
 
 	VkDescriptorSetLayout dsl;
-	vkCreateDescriptorSetLayout(gpu_context->device, &dsl_ci, nullptr, &dsl);
+	auto result = vkCreateDescriptorSetLayout(gpu_context->device, &dsl_ci, nullptr, &dsl);
+	if(result != VK_SUCCESS)
+		panic(std::format("gpu: vkCreateDescriptorSetLayout failed: {}", string_VkResult(result)));
+
 	return dsl;
 }
 
@@ -1513,7 +1508,10 @@ static std::pair<VkPipelineLayout, u64> shader_create_pipeline_layout(const Shad
 	};
 
 	VkPipelineLayout layout;
-	vkCreatePipelineLayout(gpu_context->device, &layout_ci, nullptr, &layout);
+	auto result = vkCreatePipelineLayout(gpu_context->device, &layout_ci, nullptr, &layout);
+	if(result != VK_SUCCESS)
+		panic(std::format("gpu: vkCreatePipelineLayout failed: {}", string_VkResult(result)));
+
 	return {layout, pdsl_handle};
 }
 
@@ -1551,7 +1549,9 @@ GPUPipeline gpu_create_compute_pipeline(const ShaderIR& shader)
 	};
 
 	VkPipeline pipe;
-	vkCreateComputePipelines(gpu_context->device, nullptr, 1u, &pipeline_ci, nullptr, &pipe);
+	auto result = vkCreateComputePipelines(gpu_context->device, nullptr, 1u, &pipeline_ci, nullptr, &pipe);
+	if(result != VK_SUCCESS)
+		panic(std::format("gpu: vkCreateComputePipelines failed: {}", string_VkResult(result)));
 
 	return
 	{
@@ -1746,7 +1746,9 @@ static GPUPipeline internal_create_graphics_pipeline(const ShaderIR& shader, con
 	};
 
 	VkPipeline pipe;
-	vkCreateGraphicsPipelines(gpu_context->device, nullptr, 1u, &pipeline_ci, nullptr, &pipe);
+	auto result = vkCreateGraphicsPipelines(gpu_context->device, nullptr, 1u, &pipeline_ci, nullptr, &pipe);
+	if(result != VK_SUCCESS)
+		panic(std::format("gpu: vkCreateGraphicsPipelines failed: {}", string_VkResult(result)));
 
 	return
 	{
@@ -2415,7 +2417,9 @@ static void gpu_create_swapchain()
 		.oldSwapchain = VK_NULL_HANDLE
 	};
 
-	vkCreateSwapchainKHR(gpu_context->device, &swapchain_ci, nullptr, &gpu_context->swapchain);
+	auto result = vkCreateSwapchainKHR(gpu_context->device, &swapchain_ci, nullptr, &gpu_context->swapchain);
+	if(result != VK_SUCCESS)
+		panic(std::format("gpu: vkCreateSwapchainKHR failed: {}", string_VkResult(result)));
 
 	u32 image_count{0};
 	vkGetSwapchainImagesKHR(gpu_context->device, gpu_context->swapchain, &image_count, nullptr);
@@ -2465,14 +2469,15 @@ GPUTexture gpu_swapchain_acquire_next(GPUSemaphore sem)
 	ZoneScoped;
 	u32 image_index{0};
 	
-	do
+	for(;;)
 	{
-		auto result = vkAcquireNextImageKHR(gpu_context->device, gpu_context->swapchain, 1000000, gpu_context->semaphores[sem - 1], nullptr, &image_index);
+		auto result = vkAcquireNextImageKHR(gpu_context->device, gpu_context->swapchain, 1000000000ull, gpu_context->semaphores[sem - 1], nullptr, &image_index);
 	
-		if(result == VK_SUCCESS)
+		if(result == VK_SUCCESS || result == VK_SUBOPTIMAL_KHR)
 		{
 			gpu_context->current_swapchain_index = image_index;
-			gpu_context->swapchain_dirty = false;
+			gpu_context->swapchain_dirty = (result == VK_SUBOPTIMAL_KHR);
+			break;
 		}
 		else if(result == VK_ERROR_OUT_OF_DATE_KHR)
 		{
@@ -2480,13 +2485,15 @@ GPUTexture gpu_swapchain_acquire_next(GPUSemaphore sem)
 			gpu_wait_idle();
 			gpu_cleanup_swapchain();
 			gpu_create_swapchain();
+			continue;
 		}
-		else
+		else if(result == VK_TIMEOUT)
 		{
-			log::warn("vkAcquireNextImageKHR returned {}", string_VkResult(result));
+			continue;
 		}
 
-	} while(gpu_context->swapchain_dirty);
+		panic(std::format("vkAcquireNextImageKHR returned {}", string_VkResult(result)));
+	}
 
 	return gpu_context->swapchain_textures[image_index];
 }
