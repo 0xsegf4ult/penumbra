@@ -24,6 +24,7 @@ void imgui_add_hook(std::function<void()>&& hook);
 namespace ui
 {
 
+void device_overlay_init();
 void draw_device_overlay(uvec2 root = {0u, 0u});
 
 }

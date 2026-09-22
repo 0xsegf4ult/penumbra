@@ -1,5 +1,6 @@
 #include <renderer/world.hpp>
 #include <renderer/resource.hpp>
+#include <renderer/timing.hpp>
 #include <penumbra/gpu.hpp>
 #include <penumbra/shader.hpp>
 #include <penumbra/renderer.hpp>
@@ -735,6 +736,7 @@ void renderer_world_update(GPUCommandBuffer& cmd)
 {
 	ZoneScoped;
 
+	render_gpu_pass_begin(cmd, RENDER_GPU_PASS_UPDATE);
 	renderer_world_skinning(cmd);
 
 	bool copied = upload_dirty_ranges(cmd, world->host_objects, world->objects, world->dirty_objects,
@@ -742,8 +744,9 @@ void renderer_world_update(GPUCommandBuffer& cmd)
 	copied |= upload_dirty_ranges(cmd, world->host_lights, world->lights, world->dirty_lights,
 		world->light_count, sizeof(render_light_data));
 
-	if(copied)
-		gpu_barrier(cmd, GPU_STAGE_TRANSFER, GPU_STAGE_COMPUTE | GPU_STAGE_VERTEX_SHADER);
+	gpu_barrier(cmd, GPU_STAGE_TRANSFER, GPU_STAGE_COMPUTE | GPU_STAGE_VERTEX_SHADER);
+
+	render_gpu_pass_end(cmd, RENDER_GPU_PASS_UPDATE);
 }
 
 static void renderer_world_vis_prepare(GPUCommandBuffer& cmd)
@@ -847,6 +850,7 @@ void renderer_world_determine_visibility(GPUCommandBuffer& cmd)
 {
 	ZoneScopedN("r_viscull");
 
+	render_gpu_pass_begin(cmd, RENDER_GPU_PASS_CULL);
 	renderer_world_vis_prepare(cmd);
 	gpu_barrier(cmd, GPU_STAGE_TRANSFER, GPU_STAGE_COMPUTE);
 
@@ -855,6 +859,8 @@ void renderer_world_determine_visibility(GPUCommandBuffer& cmd)
 
 	renderer_world_vis_phase2(cmd);
 	gpu_barrier(cmd, GPU_STAGE_COMPUTE, GPU_STAGE_COMMAND_PROCESSOR | GPU_STAGE_VERTEX_SHADER | GPU_STAGE_COMPUTE, GPU_HAZARD_MEMORY | GPU_HAZARD_INDIRECT_ARGS);
+
+	render_gpu_pass_end(cmd, RENDER_GPU_PASS_CULL);
 }
 
 GPUPointer renderer_world_get_objects()

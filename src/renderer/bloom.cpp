@@ -1,4 +1,5 @@
 #include <renderer/bloom.hpp>
+#include <renderer/timing.hpp>
 #include <penumbra/math/vector.hpp>
 #include <penumbra/gpu.hpp>
 #include <penumbra/renderer.hpp>
@@ -91,6 +92,8 @@ void renderer_bloom_cleanup_rendertarget(render_bloom_data& data)
 
 void renderer_bloom_process(render_bloom_data& data, GPUCommandBuffer& cmd, GPUTextureDescriptor& input)
 {
+	render_gpu_pass_begin(cmd, RENDER_GPU_PASS_BLOOM);
+
 	gpu_set_pipeline(cmd, bloom_hdrfilter_cs);
 
 	struct BloomHDRData
@@ -148,6 +151,8 @@ void renderer_bloom_process(render_bloom_data& data, GPUCommandBuffer& cmd, GPUT
 		if(i < data.bloom_mips - 2)
 			gpu_barrier(cmd, GPU_STAGE_COMPUTE, GPU_STAGE_COMPUTE);
 	}
+
+	render_gpu_pass_end(cmd, RENDER_GPU_PASS_BLOOM);
 }
 
 }

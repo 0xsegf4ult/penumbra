@@ -96,6 +96,7 @@ using GPUDevicePointer = u64;
 using GPUTexture = u32;
 using GPUSampler = u32;
 using GPUSemaphore = u32;
+using GPUTimestamp = u32;
 
 struct GPUPointer
 {
@@ -287,6 +288,10 @@ void gpu_barrier(const GPUCommandBuffer& cmd, GPUStage src, GPUStage dst, GPUHaz
 void gpu_texture_layout_transition(const GPUCommandBuffer& cmd, GPUTexture tex, GPUStage src_stage, GPUStage dst_stage, GPUTextureLayout src_layout, GPUTextureLayout dst_layout, GPUQueue src_queue = GPU_QUEUE_INVALID, GPUQueue dst_queue = GPU_QUEUE_INVALID);
 void gpu_wait_signal(GPUCommandBuffer& cmd, GPUStage dst_stage, GPUSemaphore sem, u64 timeline);
 void gpu_emit_signal(GPUCommandBuffer& cmd, GPUStage src_stage, GPUSemaphore sem, u64 timeline);
+
+void gpu_reset_timestamps(const GPUCommandBuffer& cmd, u32 first = 0, u32 count = ~0u);
+void gpu_write_timestamp(const GPUCommandBuffer& cmd, GPUTimestamp slot, GPUStage stage = GPU_STAGE_ALL);
+bool gpu_read_timestamp(GPUTimestamp slot, u64& ns);
 
 void gpu_set_pipeline(GPUCommandBuffer& cmd, GPUPipeline& pipe);
 void gpu_set_depth_stencil_state(const GPUCommandBuffer& cmd, const GPUDepthStencilDesc& state); 

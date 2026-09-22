@@ -53,6 +53,9 @@ bool penumbra_init(const penumbra_init_config& cfg)
 	if(subsystems & PENUMBRA_SUBSYSTEM_RENDERER)
 		renderer_init(main_window);
 	
+	if(subsystems & PENUMBRA_SUBSYSTEM_UI)
+		ui::device_overlay_init();
+	
 	if(subsystems & PENUMBRA_SUBSYSTEM_RESOURCE)
 		resource_manager_init();
 

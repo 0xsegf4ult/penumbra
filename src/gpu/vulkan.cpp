@@ -53,6 +53,7 @@ constexpr static size_t max_bindless_samplers = 32;
 constexpr static size_t sem_wait_timeout = 1000000000;
 constexpr static size_t max_shader_stages = 2;
 constexpr static size_t max_color_attachments = 8;
+constexpr static u32 max_timestamps = 256;
 
 struct CMDBuf_Info
 {
@@ -181,6 +182,10 @@ struct gpu_context_t
 	bool swapchain_dirty;
 
 	GPUProperties props;
+
+	VkQueryPool timestamp_pool{VK_NULL_HANDLE};
+	u64 timestamp_mask{~0ull};
+	float timestamp_period{0.0f};
 };
 
 static gpu_context_t* gpu_context = nullptr;
@@ -231,6 +236,14 @@ static std::vector<VkDeviceQueueCreateInfo> vulkan_device_create_queues()
                         (qfp.queueFlags & VK_QUEUE_TRANSFER_BIT);
         });
         gpu_context->queue_data[2].family = (iter != queue_families.end()) ? std::distance(queue_families.begin(), iter) : gpu_context->queue_data[0].family;
+
+	u32 valid_bits = 64u;
+	for(auto& queue : gpu_context->queue_data)
+		valid_bits = std::min(valid_bits, queue_families[queue.family].queueFamilyProperties.timestampValidBits);
+
+	gpu_context->timestamp_mask = (valid_bits >= 64u) ? ~0ull : ((1ull << valid_bits) - 1ull);
+	if(valid_bits == 0u)
+		log::warn("gpu_vulkan: no queue family supports timestamp queries");
 
 	std::vector<VkDeviceQueueCreateInfo> queue_ci;
 
@@ -362,6 +375,10 @@ static bool vulkan_create_device(std::span<VkPhysicalDevice> phys_devices, int i
 
 	log::info("gpu_vulkan: selected render device: {}", std::string_view{props.properties.deviceName});
 	gpu_context->props.device_name = std::string{props.properties.deviceName};
+	gpu_context->timestamp_period = props.properties.limits.timestampPeriod;
+	if(gpu_context->timestamp_period <= 0.0f)
+		log::warn("gpu_vulkan: device does not support timestamp queries");
+
 	auto queue_ci = vulkan_device_create_queues();
 
 	std::vector<const char*> device_extensions;
@@ -731,6 +748,19 @@ bool gpu_init()
 	vkCreateDescriptorSetLayout(gpu_context->device, &layout_ci, nullptr, &gpu_context->empty_descriptor_layout);
 
 	vulkan_setup_descriptor_heaps();
+
+	const VkQueryPoolCreateInfo query_ci
+	{
+		.sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO,
+		.pNext = nullptr,
+		.flags = 0,
+		.queryType = VK_QUERY_TYPE_TIMESTAMP,
+		.queryCount = max_timestamps
+	};
+
+	auto query_result = vkCreateQueryPool(gpu_context->device, &query_ci, nullptr, &gpu_context->timestamp_pool);
+	if(query_result != VK_SUCCESS)
+		panic(std::format("gpu: vkCreateQueryPool failed: {}", string_VkResult(query_result)));
 	
 	gpu_create_texture
 	({
@@ -786,6 +816,8 @@ void gpu_shutdown()
 	vkDestroyDescriptorSetLayout(gpu_context->device, gpu_context->bindless_descriptor_layout, nullptr);
 
 	vkDestroyDescriptorSetLayout(gpu_context->device, gpu_context->empty_descriptor_layout, nullptr);
+
+	vkDestroyQueryPool(gpu_context->device, gpu_context->timestamp_pool, nullptr);
 
 	for(auto& queue : gpu_context->queue_data)
 	{
@@ -2020,6 +2052,49 @@ void gpu_emit_signal(GPUCommandBuffer& cmd, GPUStage src_stage, GPUSemaphore sem
 		timeline, 
 		src_stage
 	};
+}
+
+void gpu_reset_timestamps(const GPUCommandBuffer& cmd, u32 first, u32 count)
+{
+	assert(first + count < max_timestamps);
+
+	u64 end = max_timestamps;
+	if(count != ~0u)
+		end = std::min<u64>((u64)first + count, max_timestamps);
+
+	if(end <= first)
+		return;
+
+	vkCmdResetQueryPool(std::bit_cast<VkCommandBuffer>(cmd.handle), gpu_context->timestamp_pool, first, (u32)(end - first));
+}
+
+void gpu_write_timestamp(const GPUCommandBuffer& cmd, GPUTimestamp slot, GPUStage stage)
+{
+	assert(slot < max_timestamps);
+
+	auto stage_flags = gpu_stage_to_vk(stage);
+	assert(stage_flags && "gpu_write_timestamp requires a nonzero stage");
+
+	vkCmdWriteTimestamp2(std::bit_cast<VkCommandBuffer>(cmd.handle), stage_flags, gpu_context->timestamp_pool, slot);
+}
+
+bool gpu_read_timestamp(GPUTimestamp slot, u64& ns)
+{
+	assert(slot < max_timestamps);
+
+	if(!gpu_context->timestamp_mask)
+		return false;
+
+	u64 ticks = 0;
+	auto result = vkGetQueryPoolResults(gpu_context->device, gpu_context->timestamp_pool, slot, 1u, sizeof(u64), &ticks, sizeof(u64), VK_QUERY_RESULT_64_BIT);
+	if(result == VK_NOT_READY)
+		return false;
+	else if(result != VK_SUCCESS)
+		panic(std::format("gpu: vkGetQueryPoolResults failed: {}", string_VkResult(result)));
+
+	ticks &= gpu_context->timestamp_mask;
+	ns = static_cast<u64>(static_cast<double>(ticks) * static_cast<double>(gpu_context->timestamp_period));
+	return true;
 }
 
 void gpu_set_pipeline(GPUCommandBuffer& cmd, GPUPipeline& pipe)

@@ -13,6 +13,7 @@
 #include <renderer/brdf.hpp>
 #include <renderer/resource.hpp>
 #include <renderer/shadowmap.hpp>
+#include <renderer/timing.hpp>
 #include <renderer/transparent.hpp>
 #include <renderer/world.hpp>
 #include <renderer/visbuffer.hpp>
@@ -63,6 +64,9 @@ struct renderer_context_t
 	GPUTextureDescriptor brdflut;
 
 	render_bloom_data bloom_data;
+
+	render_gpu_timings timings{};
+	u32 timing_frame[config::renderer_frames_in_flight]{};
 };
 
 static renderer_context_t* renderer = nullptr;
@@ -264,6 +268,27 @@ void renderer_shutdown()
 	gpu_shutdown();
 }
 
+static void renderer_read_gpu_timings()
+{
+	const u32 base = u32(renderer->frame_index) * RENDER_GPU_PASS_BANK_SIZE;
+	u64 ns[RENDER_GPU_PASS_BANK_SIZE];
+	bool ready = true;
+
+	for(u32 i = 0; i < RENDER_GPU_PASS_BANK_SIZE; i++)
+		ready = gpu_read_timestamp(base + i, ns[i]) && ready;
+
+	if(!ready)
+		return;
+
+	for(u32 i = 0; i < RENDER_GPU_PASS_COUNT; i++)
+	{
+		renderer->timings.ns[i][0] = ns[i * 2];
+		renderer->timings.ns[i][1] = ns[i * 2 + 1];
+	}
+
+	renderer->timings.frame = renderer->timing_frame[renderer->frame_index];
+}
+
 void renderer_next_frame()
 {
 	ZoneScoped;
@@ -286,6 +311,7 @@ void renderer_next_frame()
 		panic("renderer: gfx queue stuck");
 
 	gpu_wait_queue(GPU_QUEUE_COMPUTE, renderer->compute_queue_frames[renderer->frame_index]);
+	renderer_read_gpu_timings();
 	renderer->cur_swapchain = gpu_swapchain_acquire_next(renderer->swapchain_acquire[renderer->frame_index]);
 	renderer->frame_counter++;
 }
@@ -326,6 +352,8 @@ static void renderer_prepare_visbuffer()
 
 static void renderer_forward_passes(GPUCommandBuffer& cmd)
 {
+	render_gpu_pass_begin(cmd, RENDER_GPU_PASS_FORWARD);
+
 	gpu_begin_renderpass(cmd,
 	{
 		.color_targets =
@@ -345,6 +373,7 @@ static void renderer_forward_passes(GPUCommandBuffer& cmd)
 	renderer_transparent_draw(renderer->visbuffer, cmd);
 
 	gpu_end_renderpass(cmd);
+	render_gpu_pass_end(cmd, RENDER_GPU_PASS_FORWARD);
 }
 
 struct HDRComposeData
@@ -403,6 +432,10 @@ void renderer_process_frame(double dt)
 	assert(renderer->cur_swapchain);
 
 	auto cmd = gpu_record_commands(GPU_QUEUE_GRAPHICS);
+	gpu_reset_timestamps(cmd, u32(renderer->frame_index) * RENDER_GPU_PASS_BANK_SIZE, RENDER_GPU_PASS_BANK_SIZE);
+	render_gpu_pass_begin(cmd, RENDER_GPU_PASS_FRAME);
+	renderer->timing_frame[renderer->frame_index] = renderer->frame_counter;
+
 	gpu_wait_signal(cmd, GPU_STAGE_RASTER_COLOR_OUTPUT, renderer->swapchain_acquire[renderer->frame_index], 0);
 	gpu_texture_layout_transition(cmd, renderer->cur_swapchain, GPU_STAGE_RASTER_COLOR_OUTPUT, GPU_STAGE_RASTER_COLOR_OUTPUT, GPU_TEXTURE_LAYOUT_UNDEFINED, GPU_TEXTURE_LAYOUT_GENERAL);
 
@@ -426,10 +459,12 @@ void renderer_process_frame(double dt)
 	for(auto& hook : renderer->vb_hooks)
 		hook(cmd, vbinfo, renderer->frame_index);
 
+	render_gpu_pass_begin(cmd, RENDER_GPU_PASS_RESOLVE);
 	if(vb_debug.int_v)
 		renderer_visbuffer_visualize(renderer->visbuffer, cmd, renderer->hdrbuffer_rw);
 	else
 		renderer_visbuffer_resolve(renderer->visbuffer, cmd, renderer->hdrbuffer_rw);
+	render_gpu_pass_end(cmd, RENDER_GPU_PASS_RESOLVE);
 
 	gpu_barrier(cmd, GPU_STAGE_COMPUTE, GPU_STAGE_RASTER_COLOR_OUTPUT);
 
@@ -441,6 +476,7 @@ void renderer_process_frame(double dt)
 
 	gpu_barrier(cmd, GPU_STAGE_COMPUTE, GPU_STAGE_FRAGMENT_SHADER);
 
+	render_gpu_pass_begin(cmd, RENDER_GPU_PASS_COMPOSE);
 	renderer_try_compose_output(cmd);
 
 	gpu_begin_renderpass(cmd,
@@ -458,8 +494,10 @@ void renderer_process_frame(double dt)
 	imgui_backend_render(cmd, dt);
 
 	gpu_end_renderpass(cmd);
+	render_gpu_pass_end(cmd, RENDER_GPU_PASS_COMPOSE);
 
 	gpu_texture_layout_transition(cmd, renderer->cur_swapchain, GPU_STAGE_RASTER_COLOR_OUTPUT, GPU_STAGE_ALL, GPU_TEXTURE_LAYOUT_GENERAL, GPU_TEXTURE_LAYOUT_PRESENT);
+	render_gpu_pass_end(cmd, RENDER_GPU_PASS_FRAME);
 	gpu_emit_signal(cmd, GPU_STAGE_ALL, renderer->swapchain_present[renderer->frame_index], 0);
 	auto gfx_sync = gpu_submit(GPU_QUEUE_GRAPHICS, cmd);
 	renderer->gfx_queue_frames[renderer->frame_index] = gfx_sync;
@@ -470,6 +508,11 @@ void renderer_process_frame(double dt)
 u32 renderer_gfx_frame_index()
 {
 	return renderer->frame_index;
+}
+
+const render_gpu_timings& renderer_gpu_timings()
+{
+	return renderer->timings;
 }
 
 uvec2 renderer_get_render_resolution()

@@ -1,5 +1,6 @@
 #include <renderer/visbuffer.hpp>
 #include <renderer/resource.hpp>
+#include <renderer/timing.hpp>
 #include <renderer/world.hpp>
 #include <penumbra/gpu.hpp>
 #include <penumbra/shader.hpp>
@@ -82,6 +83,8 @@ void renderer_visbuffer_cleanup_rendertarget(visibility_buffer& visbuffer)
 
 void renderer_visbuffer_build(visibility_buffer& visbuffer, GPUCommandBuffer& cmd, GPUTexture zbuffer)
 {
+	render_gpu_pass_begin(cmd, RENDER_GPU_PASS_PREPASS);
+
 	auto geometry_storage = renderer_geometry_get_storage();
 
 	struct VBBuildData
@@ -145,6 +148,8 @@ void renderer_visbuffer_build(visibility_buffer& visbuffer, GPUCommandBuffer& cm
 	gpu_draw_indexed_indirect_count(cmd, &am_shader_data, drawcall.commands, drawcall.counter, drawcall.max_instance_count);
 
 	gpu_end_renderpass(cmd);
+
+	render_gpu_pass_end(cmd, RENDER_GPU_PASS_PREPASS);
 }
 
 void renderer_visbuffer_visualize(visibility_buffer& visbuffer, GPUCommandBuffer& cmd, GPUTextureDescriptor& output)

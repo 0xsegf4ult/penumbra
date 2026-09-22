@@ -13,6 +13,20 @@
 namespace penumbra
 {
 
+enum render_gpu_pass : u32
+{
+	RENDER_GPU_PASS_FRAME,
+	RENDER_GPU_PASS_UPDATE,
+	RENDER_GPU_PASS_CULL,
+	RENDER_GPU_PASS_PREPASS,
+	RENDER_GPU_PASS_SHADOW,
+	RENDER_GPU_PASS_RESOLVE,
+	RENDER_GPU_PASS_FORWARD,
+	RENDER_GPU_PASS_BLOOM,
+	RENDER_GPU_PASS_COMPOSE,
+	RENDER_GPU_PASS_COUNT
+};
+
 enum render_bucket
 {
 	RENDER_BUCKET_DEFAULT,
@@ -34,7 +48,14 @@ using renderViewID = u32;
 using renderObjectID = u32;
 using renderLightID = u32;
 
+constexpr u32 RENDER_GPU_PASS_BANK_SIZE = RENDER_GPU_PASS_COUNT * 2;
 constexpr renderViewID RENDER_VIEW_DEFAULT{1};
+
+struct render_gpu_timings
+{
+	u32 frame{0u};
+	u64 ns[RENDER_GPU_PASS_COUNT][2]{};
+};
 
 struct render_camera_data
 {
@@ -103,6 +124,7 @@ void renderer_shutdown();
 void renderer_next_frame();
 void renderer_process_frame(double dt);
 u32 renderer_gfx_frame_index();
+const render_gpu_timings& renderer_gpu_timings();
 
 uvec2 renderer_get_render_resolution();
 void renderer_update_render_resolution(uvec2 res);

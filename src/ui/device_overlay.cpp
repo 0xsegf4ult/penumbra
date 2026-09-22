@@ -1,13 +1,35 @@
 #include <penumbra/ui.hpp>
 #include <penumbra/gpu.hpp>
+#include <penumbra/renderer.hpp>
 #include <penumbra/config.hpp>
+#include <penumbra/cvar.hpp>
 #include <penumbra/types.hpp>
 
 namespace penumbra::ui
 {
 
+static const char* gpu_pass_names[RENDER_GPU_PASS_COUNT] =
+{
+	"frame", "update", "cull", "prepass", "shadow", "resolve", "forward", "bloom", "compose"
+};
+
+static cvar_t perf
+{
+	.name = "perf",
+	.type = CVAR_TYPE_INT,
+	.int_defv = 2
+};
+
+void device_overlay_init()
+{
+	cvar_register(&perf);
+}
+
 void draw_device_overlay(uvec2 root)
 {
+	if(!perf.int_v)
+		return;
+
 	const float fps = ImGui::GetIO().Framerate;
 	static bool p_open = true;
 	ImGui::SetNextWindowPos(ImVec2(static_cast<float>(root.x), static_cast<float>(root.y)), ImGuiCond_Always);
@@ -28,6 +50,19 @@ void draw_device_overlay(uvec2 root)
 		fps_color = ImColor(180, 220, 20, 255);
 
 	ImGui::TextColored(fps_color, "%.0f FPS (%.2f mspf)", fps, 1000.0f / fps);
+
+	if(perf.int_v > 1)
+	{
+		const auto& timings = renderer_gpu_timings();
+		if(timings.frame)
+		{
+			for(u32 i = 0; i < RENDER_GPU_PASS_COUNT; i++)
+			{
+				const u64 ns = timings.ns[i][1] - timings.ns[i][0];
+				ImGui::Text("%-7s %8.3f ms", gpu_pass_names[i], double(ns) / 1e6);
+			}
+		}
+	}
 	
 	ImGui::End();
 	ImGui::PopStyleVar(2);

@@ -1,5 +1,6 @@
 #include <renderer/shadowmap.hpp>
 #include <renderer/resource.hpp>
+#include <renderer/timing.hpp>
 #include <renderer/world.hpp>
 #include <penumbra/renderer.hpp>
 #include <penumbra/gpu.hpp>
@@ -257,6 +258,8 @@ void renderer_shadow_update(render_shadow_data& data, const render_camera_data& 
 
 void renderer_shadow_build(render_shadow_data& data, GPUCommandBuffer& cmd)
 {
+	render_gpu_pass_begin(cmd, RENDER_GPU_PASS_SHADOW);
+
 	auto geometry_storage = renderer_geometry_get_storage();
 
 	struct ShaderData
@@ -329,6 +332,8 @@ void renderer_shadow_build(render_shadow_data& data, GPUCommandBuffer& cmd)
 		
 		gpu_end_renderpass(cmd);
 	}
+
+	render_gpu_pass_end(cmd, RENDER_GPU_PASS_SHADOW);
 }
 
 }
