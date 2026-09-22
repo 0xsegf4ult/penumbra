@@ -36,7 +36,7 @@ struct input_event_t
 	{
 		struct
 		{
-			kbd_scancode scancode;
+			keycode_t scancode;
 		} key;
 
 		struct
@@ -52,7 +52,7 @@ struct input_event_t
 
 		struct
 		{
-			u8 button;
+			keycode_t button;
 		} mouse_button;
 
 		struct
@@ -65,13 +65,12 @@ struct input_event_t
 using input_listener_t = std::function<void(const input_event_t&)>;
 void input_register_listener(const input_listener_t& listener);
 
-bool input_is_key_down(kbd_scancode key);
+bool input_is_key_down(keycode_t key);
 bool input_text_input_active();
 bool input_start_text_input();
 bool input_stop_text_input();
 void input_set_mouse_capture(bool state);
 vec2 input_get_mouse_pos();
 vec2 input_get_mouse_delta();
-bool input_is_mouse_down(u8 button);
 
 }

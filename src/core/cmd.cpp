@@ -10,6 +10,51 @@ namespace penumbra
 
 constexpr u32 cmd_max_sinks = 4;
 static cmd_sink_callback cmd_sinks[cmd_max_sinks];
+static cmd_t* cmdlist = nullptr;
+
+void cmd_register(cmd_t* cmd)
+{
+	cmd->next = nullptr;
+
+	if(cvar_get(cmd->name))
+		return;
+
+	if(cmd_get(cmd->name))
+		return;
+
+	if(!cmdlist || cmd->name < cmdlist->name)
+	{
+		cmd->next = cmdlist;
+		cmdlist = cmd;
+	}
+	else
+	{
+		cmd_t* prev = cmdlist;
+		cmd_t* cur = cmdlist->next;
+		while(cur && cmd->name > cur->name)
+		{
+			prev = cur;
+			cur = cur->next;
+		}
+
+		cmd->next = prev->next;
+		prev->next = cmd;
+	}
+}
+
+cmd_t* cmd_get(std::string_view name)
+{
+	cmd_t* cur = cmdlist;
+	while(cur)
+	{
+		if(cur->name == name)
+			return cur;
+		
+		cur = cur->next;
+	}
+
+	return nullptr;
+}
 
 void console_print(std::string_view text)
 {
@@ -59,7 +104,14 @@ void cmd_executestring(std::string_view cmd_text)
 	int argc = cmd_tokenize(cmd_text, argv);
 	if(argc == 0)
 		return;
-	
+
+	cmd_t* cm = cmd_get(argv[0]);
+	if(cm)
+	{
+		cm->callback({&argv[1], size_t(argc > 1 ? argc - 1 : 0u)});
+		return;
+	}
+
 	cvar_t* cv = cvar_get(argv[0]); 
 	if(cv)
 	{

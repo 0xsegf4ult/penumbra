@@ -1,7 +1,10 @@
 #include <penumbra/input.hpp>
 #include <penumbra/window.hpp>
+#include <penumbra/cmd.hpp>
 #include <penumbra/types.hpp>
 #include <penumbra/math/vector.hpp>
+
+#include <core/input_translate.hpp>
 
 #include <SDL3/SDL_video.h>
 #include <SDL3/SDL_events.h>
@@ -9,12 +12,20 @@
 #include <SDL3/SDL_mouse.h>
 
 #include <cassert>
+#include <format>
+#include <string_view>
 #include <vector>
 
 #include <tracy/Tracy.hpp>
 
 namespace penumbra
 {
+
+struct key_binding_t
+{
+	cmd_t* event_down{nullptr};
+	cmd_t* event_up{nullptr};
+};
 
 struct input_state_t
 {
@@ -28,14 +39,75 @@ struct input_state_t
 	bool mouse_buttons[5];
 
 	bool capture_mouse{false};
+
+	key_binding_t bindings[NUM_INPUT_KEYS];
 };
 
 static input_state_t* input_state = nullptr;
+
+static void bind_cmd_cb(cmd_args_t args)
+{
+	if(args.size() < 2)
+		return;
+
+	keycode_t key = string_to_keycode(args[0]);
+	if(key == KEY_NONE)
+		return;
+
+	cmd_t* down_cmd = cmd_get(args[1]);
+	if(!down_cmd)
+		return;
+
+	cmd_t* up_cmd = nullptr;
+	if(args[1][0] == '+')
+	{
+		if(args[1].length() < 2)
+			return;
+
+		auto paired = std::format("-{}", args[1].substr(1));
+		up_cmd = cmd_get(paired);
+		if(!up_cmd)
+			return;
+	}
+
+	auto& binding = input_state->bindings[key];
+	binding.event_down = down_cmd;
+	binding.event_up = up_cmd;
+}
+
+static void unbind_cmd_cb(cmd_args_t args)
+{
+	if(args.size() < 1)
+		return;
+
+	keycode_t key = string_to_keycode(args[0]);
+	if(key == KEY_NONE)
+		return;
+
+	auto& binding = input_state->bindings[key];
+	binding.event_down = nullptr;
+	binding.event_up = nullptr;
+}
+
+static cmd_t bind_cmd
+{
+	.name = "bind",
+	.callback = bind_cmd_cb
+};
+
+static cmd_t unbind_cmd
+{
+	.name = "unbind",
+	.callback = unbind_cmd_cb
+};
 
 void input_init()
 {
 	input_state = new input_state_t();
 	input_state->key_states = SDL_GetKeyboardState(nullptr);
+
+	cmd_register(&bind_cmd);
+	cmd_register(&unbind_cmd);
 }
 
 void input_shutdown()
@@ -96,15 +168,27 @@ void input_dispatch_event(const SDL_Event& event)
 		break;
 	case SDL_EVENT_KEY_DOWN:
 	case SDL_EVENT_KEY_UP:
+	{
+		bool down = (event.type == SDL_EVENT_KEY_DOWN);
+		keycode_t key = sdl_scancode_parse(event.key.scancode);
+		
+		auto& binding = input_state->bindings[key];
+
+		if(down && binding.event_down)
+			binding.event_down->callback({});
+		else if(binding.event_up)
+			binding.event_up->callback({});
+
 		listener_dispatch
 		({
-			.type = (event.type == SDL_EVENT_KEY_DOWN) ? INPUT_EVENT_KEY_DOWN : INPUT_EVENT_KEY_UP,
+			.type = down ? INPUT_EVENT_KEY_DOWN : INPUT_EVENT_KEY_UP,
 			.key =
 			{
-				.scancode = sdl_scancode_parse(event.key.scancode)
+				.scancode = key 
 			}
 		});
 		break;
+	}
 	case SDL_EVENT_TEXT_INPUT:
 		listener_dispatch
 		({
@@ -128,15 +212,26 @@ void input_dispatch_event(const SDL_Event& event)
 		break;
 	case SDL_EVENT_MOUSE_BUTTON_DOWN:
 	case SDL_EVENT_MOUSE_BUTTON_UP:
+	{
+		bool down = (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN);
+		keycode_t key = sdl_mouse_parse(event.button.button);
+
+		auto& binding = input_state->bindings[key];
+		if(down && binding.event_down)
+			binding.event_down->callback({});
+		else if(binding.event_up)
+			binding.event_up->callback({});
+
 		listener_dispatch
 		({
-			.type = (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN) ? INPUT_EVENT_MOUSE_BUTTON_DOWN : INPUT_EVENT_MOUSE_BUTTON_UP,
+			.type = down ? INPUT_EVENT_MOUSE_BUTTON_DOWN : INPUT_EVENT_MOUSE_BUTTON_UP,
 			.mouse_button =
 			{
-				.button = sdl_mouse_parse(event.button.button)
+				.button = key
 			}
 		});
 		break;
+	}
 	case SDL_EVENT_MOUSE_WHEEL:
 		listener_dispatch
 		({
@@ -158,14 +253,16 @@ void input_register_listener(const input_listener_t& listener)
 	input_state->listeners.push_back(listener);
 }
 
-bool input_is_key_down(kbd_scancode key)
+bool input_is_key_down(keycode_t key)
 {
 	assert(input_state);
 
-	if(key >= SCANCODE_COUNT)
+	if(key >= MOUSE_LEFT && key <= MOUSE_5)
+		return input_state->mouse_buttons[key - MOUSE_LEFT];
+	else if(key >= NUM_INPUT_KEYS)
 		return false;
 
-	return input_state->key_states[scancode_to_sdl(key)];
+	return input_state->key_states[keycode_to_sdl_key(key)];
 }
 
 bool input_text_input_active()

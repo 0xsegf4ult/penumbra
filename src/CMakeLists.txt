@@ -33,6 +33,7 @@ target_sources(penumbra PRIVATE
 	core/cvar.cpp
 	core/init.cpp
 	core/input.cpp
+	core/input_translate.cpp
 	core/memory.cpp
 	core/panic.cpp
 	core/vfs.cpp
