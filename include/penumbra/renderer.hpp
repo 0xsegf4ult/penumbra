@@ -75,10 +75,10 @@ struct render_environment_map
 
 struct render_environment_data
 {
-	vec3 light_direction;
-	vec3 light_color;
-	float light_intensity;
-	float ambient_intensity;
+	vec3 light_direction{0.0f, -1.0f, 0.0f};
+	vec3 light_color{1.0f};
+	float light_intensity{1.0f};
+	float ambient_intensity{1.0f};
 	render_environment_map envmap;
 };
 

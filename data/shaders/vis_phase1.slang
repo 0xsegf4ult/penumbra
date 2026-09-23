@@ -29,7 +29,7 @@ bool is_visible(float4 sphere, float radius)
 		{
 			visible = visible && center.z * culling_data.frustum_planes[0].y - abs(center.x) * culling_data.frustum_planes[0].x > -radius;
 			visible = visible && center.z * culling_data.frustum_planes[0].w - abs(center.y) * culling_data.frustum_planes[0].z > -radius;
-			visible = visible && -center.z + radius > culling_data.znear && -center.z - radius < culling_data.zfar;
+			visible = visible && -center.z + radius > culling_data.znear && length(center) - radius < culling_data.zfar;
 		}
 	}
 

@@ -10,6 +10,8 @@
 namespace penumbra
 {
 
+constexpr u32 CSM_DIM = 1536u;
+
 struct render_csm_cascade
 {
 	GPUTexture texture;
@@ -25,10 +27,11 @@ struct render_csm_cascade
 struct render_shadow_data
 {
 	u32 max_cascades{3u};
-	float csm_lambda{0.9f};
+	float csm_lambda{0.7f};
 	float csm_cbias{0.00125f};
 	float csm_nbias{0.275f};
-	float csm_scale{1.0f};
+	float csm_pcf_radius{1.0f};
+	u32 csm_debug{0u};
 	
 	std::vector<render_csm_cascade> cascades;
 	GPUPointer smap_transforms;

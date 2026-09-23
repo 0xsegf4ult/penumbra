@@ -22,39 +22,48 @@ static GPUPipeline shadowmap_opaque_pso;
 static GPUPipeline shadowmap_alphamask_pso;
 static GPUDepthStencilDesc shadow_ds;
 
-constexpr u32 CSM_DIM = 1536u;
 constexpr u32 CSM_CASCADES = 3;
 
 static cvar_t cvar_max_cascades
 {
 	.name = "r_csm_cascades",
 	.type = CVAR_TYPE_INT,
-	.int_defv = CSM_CASCADES,
-	.int_v = CSM_CASCADES
+	.int_defv = CSM_CASCADES
 };
 
 static cvar_t cvar_csm_lambda
 {
 	.name = "r_csm_lambda",
 	.type = CVAR_TYPE_FLOAT,
-	.float_defv = 0.9f,
-	.float_v = 0.9f
+	.float_defv = 0.7f
 };
 
 static cvar_t cvar_cbias
 {
 	.name = "r_csm_cbias",
 	.type = CVAR_TYPE_FLOAT,
-	.float_defv = 0.00125f,
-	.float_v = 0.00125f
+	.float_defv = 0.00125f
 };
 
 static cvar_t cvar_nbias
 {
 	.name = "r_csm_nbias",
 	.type = CVAR_TYPE_FLOAT,
-	.float_defv = 0.275f,
-	.float_v = 0.275f
+	.float_defv = 0.275f
+};
+
+static cvar_t cvar_pcf_radius
+{
+	.name = "r_csm_pcf",
+	.type = CVAR_TYPE_FLOAT,
+	.float_defv = 1.0f
+};
+
+static cvar_t cvar_csm_debug
+{
+	.name = "r_csm_debug",
+	.type = CVAR_TYPE_INT,
+	.int_defv = 0
 };
 
 void renderer_shadow_init(render_shadow_data& data)
@@ -90,6 +99,8 @@ void renderer_shadow_init(render_shadow_data& data)
 	cvar_register(&cvar_csm_lambda);
 	cvar_register(&cvar_cbias);
 	cvar_register(&cvar_nbias);
+	cvar_register(&cvar_pcf_radius);
+	cvar_register(&cvar_csm_debug);
 
 	data.smap_transforms = gpu_allocate_memory(sizeof(mat4) * 512 * 2, GPU_MEMORY_MAPPED);
 
@@ -140,19 +151,22 @@ void renderer_shadow_update(render_shadow_data& data, const render_camera_data& 
 	data.csm_lambda = std::max(0.0f, cvar_csm_lambda.float_v);
 	data.csm_cbias = std::max(0.0f, cvar_cbias.float_v);
 	data.csm_nbias = std::max(0.0f, cvar_nbias.float_v);
+	data.csm_pcf_radius = std::max(0.0f, cvar_pcf_radius.float_v);
+	data.csm_debug = u32(std::max(0, cvar_csm_debug.int_v));
 	data.max_cascades = std::min(u32(std::max(0, cvar_max_cascades.int_v)), CSM_CASCADES);
 	u32 maxc = data.max_cascades;
 
+	// reverse-z NDC: z=0 is the far plane, z=1 is the near plane
 	vec3 frustum_corners[8] =
 	{
 		vec3{-1.0f, 1.0f, 0.0f},
 		vec3{1.0f, 1.0f, 0.0f},
 		vec3{1.0f, -1.0f, 0.0f},
 		vec3{-1.0f, -1.0f, 0.0f},
-		vec3{-1.0f, 1.0f, -1.0f},
-		vec3{1.0f, 1.0f, -1.0f},
-		vec3{1.0f, -1.0f, -1.0f},
-		vec3{-1.0f, -1.0f, -1.0f}
+		vec3{-1.0f, 1.0f, 1.0f},
+		vec3{1.0f, 1.0f, 1.0f},
+		vec3{1.0f, -1.0f, 1.0f},
+		vec3{-1.0f, -1.0f, 1.0f}
 	};
 
 	float range = main_camera.zfar - main_camera.znear;
@@ -188,7 +202,10 @@ void renderer_shadow_update(render_shadow_data& data, const render_camera_data& 
 	}
 		
 	vec3 forward = light_dir;
-	vec3 right = vec3::normalize(vec3::cross(forward, vector_world_up));
+	const vec3 ref = std::abs(vec3::dot(forward, vector_world_up)) > 0.999f
+		? vec3{1.0f, 0.0f, 0.0f}
+		: vector_world_up;
+	vec3 right = vec3::normalize(vec3::cross(forward, ref));
 	vec3 up = vec3::normalize(vec3::cross(right, forward));
 
 	float prev_split_dist = 0.0f;
@@ -220,7 +237,7 @@ void renderer_shadow_update(render_shadow_data& data, const render_camera_data& 
 		auto sp_point = vec4{0.0f, 0.0f, -1.0f * (main_camera.znear + split_dist[i] * range), 1.0f} * main_camera.proj;
 		cascade.split_point = sp_point.z / sp_point.w;
 
-	 	auto pos = fcenter - (light_dir * radius * 2.0f);
+		auto pos = fcenter - (light_dir * radius);
 
 		float tX = vec3::dot(pos, right);
 		float tY = vec3::dot(pos, up);
@@ -245,7 +262,7 @@ void renderer_shadow_update(render_shadow_data& data, const render_camera_data& 
 		vec4 sorigin = vec4{0.0f, 0.0f, 0.0f, 1.0f} * cam_mtx;
 		auto hres = static_cast<float>(cascade.dim / 2);
 		sorigin *= hres;
-		vec2 rorigin = vec2{std::round(sorigin.x), std::round(sorigin.y)};
+		vec2 rorigin = vec2{std::round(sorigin.x - 0.5f) + 0.5f, std::round(sorigin.y - 0.5f) + 0.5f};
 		vec2 rounding = rorigin - vec2{sorigin.x, sorigin.y};
 		rounding /= hres;
 		mat4 rounding_mtx = mat4::make_translation(vec3{rounding.x, rounding.y, 0.0f});

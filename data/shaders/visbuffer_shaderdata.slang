@@ -53,6 +53,7 @@ struct VisbufferConstants
 	float csm_cbias;
 	float csm_nbias;
 	float csm_scale;
+	float csm_pcf_radius;
 	
 	float cascade_splits[4];
 	ResourceHandle<Texture2D> cascade_rts[4];

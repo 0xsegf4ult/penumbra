@@ -332,11 +332,20 @@ static void renderer_prepare_visbuffer()
 	vbconst->env_prefiltered_handle = renderer->env.envmap.prefiltered.handle;
 	vbconst->csm_cbias = renderer->shadow_data.csm_cbias;
 	vbconst->csm_nbias = renderer->shadow_data.csm_nbias;
-	vbconst->csm_scale = renderer->shadow_data.csm_scale / 1536.0f;
-	for(int i = 0; i < renderer->shadow_data.max_cascades; i++)
+	vbconst->csm_scale = 1.0f / float(CSM_DIM);
+	vbconst->csm_pcf_radius = renderer->shadow_data.csm_pcf_radius;
+	
+	for(int i = 0; i < 3; i++)
 	{
-		vbconst->cascade_rts[i] = renderer->shadow_data.cascades[i].descriptor.handle;
-		vbconst->cascade_splits[i] = renderer->shadow_data.cascades[i].split_point;
+		if(i < int(renderer->shadow_data.max_cascades))
+		{
+			vbconst->cascade_rts[i] = renderer->shadow_data.cascades[i].descriptor.handle;
+			vbconst->cascade_splits[i] = renderer->shadow_data.cascades[i].split_point;
+		}
+		else
+		{
+			vbconst->cascade_splits[i] = -1.0f;
+		}
 	}
 
 	vbconst->smap_data = gpu_host_to_device_pointer(renderer->shadow_data.smap_transforms) + (512 * renderer->frame_index * sizeof(mat4));
@@ -346,7 +355,8 @@ static void renderer_prepare_visbuffer()
 	{
 		std::ceilf(float(renderer->render_resolution.x) / 16.0f),
 		std::ceilf(float(renderer->render_resolution.y) / 8.0f),
-		0.0f, 0.0f
+		float(renderer->shadow_data.csm_debug),
+		0.0f
 	};
 }
 
@@ -553,6 +563,7 @@ void renderer_update_camera(const render_camera_data& data)
 void renderer_update_environment(const render_environment_data& data)
 {
 	renderer->env = data;
+	renderer->env.light_direction = vec3::normalize(renderer->env.light_direction);
 }
 
 void renderer_hook_visbuffer(const visbuffer_hook& hook)

@@ -38,7 +38,8 @@ float4 sphere_screen_extents(float3 pos, float rad, float projX, float projY)
 	float vc = pos.z * vv;
 	res.y = (va - d) * projY / (vc + vb);
 	res.w = (va + d) * projY / (vc - vb);
-	return res;
+	
+	return float4(min(res.xy, res.zw), max(res.xy, res.zw));
 }
 
 bool is_visible(float4 sphere, float radius, float3 cone, float cone_cutoff)
@@ -59,7 +60,7 @@ bool is_visible(float4 sphere, float radius, float3 cone, float cone_cutoff)
 		{
 			visible = visible && center.z * culling_data.frustum_planes[0].y - abs(center.x) * culling_data.frustum_planes[0].x > -radius;
 			visible = visible && center.z * culling_data.frustum_planes[0].w - abs(center.y) * culling_data.frustum_planes[0].z > -radius;
-			visible = visible && -center.z + radius > culling_data.znear && -center.z - radius < culling_data.zfar;
+			visible = visible && -center.z + radius > culling_data.znear && length(center) - radius < culling_data.zfar;
 		}
 	}
 
@@ -71,14 +72,23 @@ bool is_visible(float4 sphere, float radius, float3 cone, float cone_cutoff)
 			visible = visible && dot(center, cone_axis) < cone_cutoff * length(center) + radius;
 	}
 
-	float4 sph_ext = sphere_screen_extents(center, radius, culling_data.projX, culling_data.projY); 
+	float4 sph_ext;
+	if(culling_data.flags & CullingFlags.IsOrtho)
+	{
+		float2 ext = radius * abs(float2(culling_data.projX, culling_data.projY));
+		float2 ctr = center.xy * float2(culling_data.projX, culling_data.projY);
+		sph_ext = float4(ctr - ext, ctr + ext);
+	}
+	else
+		sph_ext = sphere_screen_extents(center, radius, culling_data.projX, culling_data.projY);
+ 
 	if(visible && culling_data.flags & CullingFlags.ContributionCull)
 	{
 		float fW = abs(sph_ext.z - sph_ext.x);
 		float fH = abs(sph_ext.w - sph_ext.y);
 
-		visible = visible && any(sph_ext.xy <= 1.0f);
-		visible = visible && any(sph_ext.zw >= -1.0f);
+		visible = visible && all(sph_ext.xy <= 1.0f);
+		visible = visible && all(sph_ext.zw >= -1.0f);
 		visible = visible && (max(fW, fH) > culling_data.min_contrib);
 	}
 

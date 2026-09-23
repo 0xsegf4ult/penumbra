@@ -34,6 +34,7 @@ struct visbuffer_cbuffer
 	float csm_cbias;
 	float csm_nbias;
 	float csm_scale;
+	float csm_pcf_radius;
 
 	float cascade_splits[4];
 	u32 cascade_rts[4];

@@ -48,23 +48,25 @@ float interleavedGradientNoise(float2 pos)
 	return frac(52.9829189 * frac(dot(pos, float2(0.06711056, 0.00583715))));
 }
 
-float filterPCF(uint sm_index, float4 posLS, float2 svpos)
+float filterPCF(uint sm_index, float4 posLS, float2 svpos, float ndotl)
 {
 	ResourceHandle<SamplerComparisonState> sm_shadow = {SAMPLER_COMPARE_BORDER};
-	float dx = consts.csm_scale * (0.25 * (3 - sm_index)) * 2.5f;
+	float2 dxy = float2(max(consts.csm_pcf_radius, 1.0) * consts.csm_scale);
 	float factor = 0.0;
 
 	float3 ndc = posLS.xyz / posLS.w;
 	float2 textureUV = float2(ndc.x, ndc.y) * 0.5 + 0.5;
+	float slope = min(sqrt(max(1.0 - ndotl * ndotl, 0.0)) / max(ndotl, 1e-3), 8.0) * consts.csm_scale;
+	float ref = ndc.z - consts.csm_cbias - 2.0 * slope;
 
 	const float phi = interleavedGradientNoise(svpos) * 6.28318530718;
 
 	DescriptorHandle<Texture2D> rt = consts.cascade_rts[sm_index].desc;
-	factor += nonuniform(rt)->SampleCmpLevelZero(sm_shadow.desc, textureUV + vogelDiskSample(0, 5, phi) * float2(dx, dx), ndc.z - consts.csm_cbias);
-	factor += nonuniform(rt)->SampleCmpLevelZero(sm_shadow.desc, textureUV + vogelDiskSample(1, 5, phi) * float2(dx, dx), ndc.z - consts.csm_cbias);
-	factor += nonuniform(rt)->SampleCmpLevelZero(sm_shadow.desc, textureUV + vogelDiskSample(2, 5, phi) * float2(dx, dx), ndc.z - consts.csm_cbias);
-	factor += nonuniform(rt)->SampleCmpLevelZero(sm_shadow.desc, textureUV + vogelDiskSample(3, 5, phi) * float2(dx, dx), ndc.z - consts.csm_cbias);
-	factor += nonuniform(rt)->SampleCmpLevelZero(sm_shadow.desc, textureUV + vogelDiskSample(4, 5, phi) * float2(dx, dx), ndc.z - consts.csm_cbias);
+	factor += nonuniform(rt)->SampleCmpLevelZero(sm_shadow.desc, textureUV + vogelDiskSample(0, 5, phi) * dxy, ref);
+	factor += nonuniform(rt)->SampleCmpLevelZero(sm_shadow.desc, textureUV + vogelDiskSample(1, 5, phi) * dxy, ref);
+	factor += nonuniform(rt)->SampleCmpLevelZero(sm_shadow.desc, textureUV + vogelDiskSample(2, 5, phi) * dxy, ref);
+	factor += nonuniform(rt)->SampleCmpLevelZero(sm_shadow.desc, textureUV + vogelDiskSample(3, 5, phi) * dxy, ref);
+	factor += nonuniform(rt)->SampleCmpLevelZero(sm_shadow.desc, textureUV + vogelDiskSample(4, 5, phi) * dxy, ref);
 	return factor * 0.2;
 }
 
@@ -138,7 +140,8 @@ float3 calculate_spot_lighting(uint i, Surface surface)
 	return (surface.diffuse + specular_contrib) * luminance;
 }
 */
-float3 calculate_direct_lighting(Surface surface, float depth, float2 svpos)
+
+uint select_cascade(float depth)
 {
 	uint cascadeIndex = 0;
 	for(uint i = 0; i < 2; i++)
@@ -146,14 +149,22 @@ float3 calculate_direct_lighting(Surface surface, float depth, float2 svpos)
 		if(depth < consts.cascade_splits[i])
 			cascadeIndex = i + 1;
 	}
+	return cascadeIndex;
+}
 
-	float3 L = normalize(-consts.light_direction.xyz);
+float3 calculate_direct_lighting(Surface surface, float depth, float2 svpos)
+{
+	uint cascadeIndex = select_cascade(depth);
+
+	float3 L = -consts.light_direction.xyz;
 	float NdotL = saturate(dot(surface.N, L));
-	float3 sm_samplePos = surface.wpos + (surface.g_normal * dot(surface.g_normal, L) * consts.csm_nbias);
+	float g_NdotL = dot(surface.g_normal, L);
+	float nbias_w = (g_NdotL < 0.0) ? 0.0 : (1.0 - saturate(g_NdotL));
+	float3 sm_samplePos = surface.wpos + (surface.g_normal * nbias_w * consts.csm_nbias);
 	if(NdotL < 0.01)
 		return float3(0.0f);		
 
-	float shadow = filterPCF(cascadeIndex, mul(float4(sm_samplePos, 1.0), consts.smap_data[cascadeIndex]), svpos);
+	float shadow = filterPCF(cascadeIndex, mul(float4(sm_samplePos, 1.0), consts.smap_data[cascadeIndex]), svpos, NdotL);
 
 	float3 H = normalize(surface.V + L);
 	float NdotH = saturate(dot(surface.N, H));
@@ -262,6 +273,25 @@ void computeMain(uint groupIndex : SV_GroupIndex, uint2 Gid : SV_GroupID, unifor
 	float4 tmp = mul(float4(surface.wpos, 1.0), consts.camera);
 	tmp.xyz /= tmp.w;
 	surface.V = normalize(consts.cam_pos.xyz - surface.wpos.xyz);
+
+	if(consts.cluster_sizes.z > 0.5f)
+	{
+		uint dbg_cascade = select_cascade(tmp.z);
+		if(consts.cluster_sizes.z < 1.5f)
+		{
+			float3 dbg = dbg_cascade == 0 ? float3(1.0, 0.0, 0.0)
+				: dbg_cascade == 1 ? float3(0.0, 1.0, 0.0) : float3(0.0, 0.0, 1.0);
+			input.framebuffer.desc[pixel] = dbg;
+			return;
+		}
+		float dbg_z = mul(float4(surface.wpos, 1.0), consts.smap_data[dbg_cascade]).z;
+		float3 dbg = isnan(dbg_z) ? float3(1.0, 0.0, 1.0)
+			: dbg_z < 0.0 ? float3(0.0, 0.0, 1.0)
+			: dbg_z >= 1.0 ? float3(1.0, 0.0, 0.0)
+			: float3(dbg_z);
+		input.framebuffer.desc[pixel] = dbg;
+		return;
+	}
 
 	float2 uvs;
 	float2 uv_dx;
