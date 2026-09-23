@@ -88,19 +88,39 @@ static vfs_fd get_free_fd()
 	return -1;
 }
 
+static void release_fd(vfs_fd fd)
+{
+	std::unique_lock<std::shared_mutex> w_lock{context->lock};
+
+	auto bmp_offset = fd / 64;
+	auto bit_offset = fd % 64;
+	context->bitmap[bmp_offset] |= (1ull << bit_offset);
+}
+
 vfs_fd vfs_open(const vfs_path& p, vfs_access_t mode)
 {
 	vfs_fd handle = get_free_fd();
 	if(handle < 0)
 		return handle;
 
-	if(!std::filesystem::exists(p))
+	file_t& f = context->table[handle];
+	f.size = 0;
+	f.mapped = nullptr;
+	#if defined _WIN32
+	f.map = 0;
+	#endif
+
+	auto fail = [&]() -> vfs_fd
+	{
+		release_fd(handle);
 		return -1;
+	};
+
+	if(!std::filesystem::exists(p))
+		return fail();
 
 	if(std::filesystem::is_directory(p))
-		return -1;
-
-	file_t& f = context->table[handle];
+		return fail();
 
 	#if defined __linux__
 
@@ -123,22 +143,28 @@ vfs_fd vfs_open(const vfs_path& p, vfs_access_t mode)
 	if(f.fd < 0)
 	{
 		std::perror("vfs_open: open() failed");
-		return -1;
+		return fail();
 	}
 
 	struct stat file_info;
 	if(fstat(f.fd, &file_info) < 0)
 	{
 		std::perror("vfs_open: stat() failed");
-		return -1;
+		close(f.fd);
+		return fail();
 	}
 	f.size = static_cast<size_t>(file_info.st_size);
 
-	f.mapped = reinterpret_cast<u8*>(mmap(nullptr, f.size, prot, MAP_PRIVATE, f.fd, 0));
-	if(f.mapped == MAP_FAILED)
+	if(f.size > 0)
 	{
-		std::perror("vfs_open: mmap() failed");
-		return -1;
+		f.mapped = reinterpret_cast<u8*>(mmap(nullptr, f.size, prot, MAP_PRIVATE, f.fd, 0));
+		if(f.mapped == MAP_FAILED)
+		{
+			std::perror("vfs_open: mmap() failed");
+			f.mapped = nullptr;
+			close(f.fd);
+			return fail();
+		}
 	}
 	#elif defined _WIN32
 
@@ -161,7 +187,7 @@ vfs_fd vfs_open(const vfs_path& p, vfs_access_t mode)
 	if(f.fd == INVALID_HANDLE_VALUE)
 	{
 		log::error("vfs_open: CreateFileW failed: {}", GetLastError());
-		return -1;
+		return fail();
 	}
 
 	LARGE_INTEGER fsize;
@@ -169,41 +195,44 @@ vfs_fd vfs_open(const vfs_path& p, vfs_access_t mode)
 	{
 		log::error("vfs_open: GetFileSizeEx failed: {}", GetLastError());
 		CloseHandle(f.fd);
-		return -1;
+		return fail();
 	}
 
 	f.size = static_cast<size_t>(fsize.QuadPart);
 
-	f.map = CreateFileMapping
-	(
-		f.fd,
-		nullptr,
-		PAGE_READONLY,
-		0,
-		0,
-		nullptr
-	);
-
-	if(f.map == 0)
+	if(f.size > 0)
 	{
-		log::error("vfs_open: CreateFileMapping failed: {}", GetLastError());
-		CloseHandle(f.fd);
-		return -1;
-	}
+		f.map = CreateFileMapping
+		(
+			f.fd,
+			nullptr,
+			PAGE_READONLY,
+			0,
+			0,
+			nullptr
+		);
 
-	f.mapped = reinterpret_cast<u8*>(MapViewOfFile
-	(
-		f.map,
-		FILE_MAP_READ,
-		0, 0, 0
-	));
+		if(f.map == 0)
+		{
+			log::error("vfs_open: CreateFileMapping failed: {}", GetLastError());
+			CloseHandle(f.fd);
+			return fail();
+		}
 
-	if(f.mapped == nullptr)
-	{
-		log::error("vfs_open: MapViewOfFile failed: {}", GetLastError());
-		CloseHandle(f.map);
-		CloseHandle(f.fd);
-		return -1;
+		f.mapped = reinterpret_cast<u8*>(MapViewOfFile
+		(
+			f.map,
+			FILE_MAP_READ,
+			0, 0, 0
+		));
+
+		if(f.mapped == nullptr)
+		{
+			log::error("vfs_open: MapViewOfFile failed: {}", GetLastError());
+			CloseHandle(f.map);
+			CloseHandle(f.fd);
+			return fail();
+		}
 	}
 	#else
 	static_assert(false, "vfs_open not implemented");
@@ -214,24 +243,22 @@ vfs_fd vfs_open(const vfs_path& p, vfs_access_t mode)
 
 void vfs_close(vfs_fd fd)
 {
-	std::unique_lock<std::shared_mutex> w_lock{context->lock};
-
 	file_t& f = context->table[fd];
 	#if defined __linux__
-	munmap(f.mapped, f.size);
+	if(f.mapped)
+		munmap(f.mapped, f.size);
 	close(f.fd);
 	#elif defined _WIN32
-	UnmapViewOfFile(f.mapped);
-	CloseHandle(f.map);
+	if(f.mapped)
+		UnmapViewOfFile(f.mapped);
+	if(f.map)
+		CloseHandle(f.map);
 	CloseHandle(f.fd);
 	#else
 	static_assert(false, "vfs_close not implemented");
 	#endif
 
-	auto bmp_offset = fd / 64;
-	auto bit_offset = fd % 64;
-
-	context->bitmap[bmp_offset] |= (1ull << bit_offset);
+	release_fd(fd);
 }
 
 const u8* vfs_map(vfs_fd fd)
@@ -244,6 +271,12 @@ u8* vfs_map_rw(vfs_fd fd)
 {
 	std::scoped_lock<std::shared_mutex> r_lock{context->lock};
 	return context->table[fd].mapped;
+}
+
+size_t vfs_size(vfs_fd fd)
+{
+	std::shared_lock<std::shared_mutex> r_lock{context->lock};
+	return context->table[fd].size;
 }
 
 }

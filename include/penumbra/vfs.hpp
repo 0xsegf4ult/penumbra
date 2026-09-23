@@ -24,5 +24,6 @@ void vfs_close(vfs_fd fd);
 
 const u8* vfs_map(vfs_fd fd);
 u8* vfs_map_rw(vfs_fd fd);
+size_t vfs_size(vfs_fd fd);
 
 }

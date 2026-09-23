@@ -39,6 +39,7 @@ bool penumbra_init(const penumbra_init_config& cfg)
 	cvar_register(&tickrate);
 
 	vfs_init();
+	cmd_init();
 
 	if(subsystems & PENUMBRA_SUBSYSTEM_WINDOW)
 		wm_init();
@@ -104,6 +105,8 @@ void penumbra_run(void* state, prepare_update_t pupd, fixed_update_t fupd, varia
 	auto start = std::chrono::steady_clock::now();
 	std::chrono::steady_clock::duration accumulator{0};
 	std::chrono::microseconds fixed_timestep{int(1.0 / double(tickrate.int_v) * 1e6)};
+
+	cmd_executestring("exec autoexec.cfg");
 
 	while(should_run())
 	{

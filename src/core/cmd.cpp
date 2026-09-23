@@ -1,5 +1,6 @@
 #include <penumbra/cmd.hpp>
 #include <penumbra/cvar.hpp>
+#include <penumbra/vfs.hpp>
 
 #include <string_view>
 #include <format>
@@ -100,6 +101,9 @@ static int cmd_tokenize(std::string_view cmd_text, std::string_view* argv)
 
 void cmd_executestring(std::string_view cmd_text)
 {
+	if(!cmd_text.empty() && cmd_text.back() == '\r')
+		cmd_text.remove_suffix(1);
+
 	std::string_view argv[16];
 	int argc = cmd_tokenize(cmd_text, argv);
 	if(argc == 0)
@@ -139,6 +143,66 @@ void cmd_executestring(std::string_view cmd_text)
 	}
 
 	console_print(std::format("Unknown command: {}\n", cmd_text).c_str());
+}
+
+void cmd_executescript(std::string_view text)
+{
+	size_t pos = 0;
+	while(pos <= text.size())
+	{
+		auto end = text.find('\n', pos);
+		if(end == std::string_view::npos)
+			end = text.size();
+
+		auto line = text.substr(pos, end - pos);
+		auto first = line.find_first_not_of(" \t");
+		if(first == std::string_view::npos || line[first] != '#')
+			cmd_executestring(line);
+
+		pos = end + 1;
+	}
+}
+
+constexpr int exec_max_depth = 16;
+static int exec_depth = 0;
+
+static void exec_cmd_cb(cmd_args_t args)
+{
+	if(args.size() < 1)
+	{
+		console_print("usage: exec <path>\n");
+		return;
+	}
+
+	if(exec_depth >= exec_max_depth)
+	{
+		console_print(std::format("exec: recursion limit reached ({})\n", exec_max_depth));
+		return;
+	}
+
+	vfs_fd file = vfs_open(vfs_path(args[0]), VFS_ACCESS_READ);
+	if(file < 0)
+	{
+		console_print(std::format("exec: could not open {}\n", args[0]));
+		return;
+	}
+
+	exec_depth++;
+	if(auto size = vfs_size(file); size > 0)
+		cmd_executescript({reinterpret_cast<const char*>(vfs_map(file)), size});
+	exec_depth--;
+	vfs_close(file);
+}
+
+static cmd_t exec_cmd
+{
+	.name = "exec",
+	.callback = exec_cmd_cb
+};
+
+void cmd_init()
+{
+	cmd_register(&exec_cmd);
 }
 
 

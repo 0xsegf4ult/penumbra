@@ -21,6 +21,9 @@ cmd_t* cmd_get(std::string_view name);
 typedef void (*cmd_sink_callback)(std::string_view data);
 
 void cmd_executestring(std::string_view string);
+void cmd_executescript(std::string_view text);
 void cmd_register_output_sink(cmd_sink_callback callback);
+
+void cmd_init();
 
 }
