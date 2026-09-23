@@ -17,16 +17,6 @@ using std::memcpy;
 namespace penumbra
 {
 
-struct geometry_full_lod
-{
-	s32 vertex_offset;
-	u32 vertex_count;
-	u32 index_offset;
-	u32 index_count;
-};
-
-constexpr u32 geometry_max_lod_count = 8;
-
 const float signNotZero(float v)
 {
 	return (v >= 0.0f) ? 1.0f : -1.0f;
@@ -93,7 +83,7 @@ u32 encode_tangent(const vec3& normal, const vec3& tangent, bool flip)
 	return fbits;
 }
 
-ResourceID import_geometry(geometry_import_context& ctx)
+std::vector<geometry_full_vertex> geometry_prepare(geometry_import_context& ctx)
 {
 	std::vector<geometry_full_vertex> remap_vertices;
 	std::vector<u32> remap_table(ctx.indices.size());
@@ -106,6 +96,13 @@ ResourceID import_geometry(geometry_import_context& ctx)
 	meshopt_optimizeVertexCache(ctx.indices.data(), ctx.indices.data(), ctx.indices.size(), remap_vertices.size());
 	meshopt_optimizeOverdraw(ctx.indices.data(), ctx.indices.data(), ctx.indices.size(), &remap_vertices[0].pos.x, remap_vertices.size(), sizeof(geometry_full_vertex), 1.01f);
 	meshopt_optimizeVertexFetch(remap_vertices.data(), ctx.indices.data(), ctx.indices.size(), remap_vertices.data(), remap_vertices.size(), sizeof(geometry_full_vertex));
+
+	return remap_vertices;
+}
+
+ResourceID import_geometry(geometry_import_context& ctx)
+{
+	auto remap_vertices = geometry_prepare(ctx);
 
 	std::array<geometry_full_lod, geometry_max_lod_count> lods;
        	lods[0] = {0, static_cast<u32>(remap_vertices.size()), 0u, static_cast<u32>(ctx.indices.size())};
@@ -149,6 +146,12 @@ ResourceID import_geometry(geometry_import_context& ctx)
 		num_lods++;
 	}
 
+	return geometry_meshletize_import(ctx, std::span{lods}.first(num_lods), remap_vertices);
+}
+
+ResourceID geometry_meshletize_import(geometry_import_context& ctx, std::span<const geometry_full_lod> lods,
+                                      std::vector<geometry_full_vertex>& remap_vertices)
+{
 	std::array<std::vector<meshopt_Meshlet>, geometry_max_lod_count> lod_clusters;
 	std::array<std::vector<u32>, geometry_max_lod_count> lod_cluster_vertices;
 	std::array<std::vector<u8>, geometry_max_lod_count> lod_cluster_triangles;
@@ -158,7 +161,7 @@ ResourceID import_geometry(geometry_import_context& ctx)
 	const u32 max_triangles = 96u;
 	const float cone_weight = 0.25f;
 
-	for(u32 l = 0; l < num_lods; l++)
+	for(u32 l = 0; l < lods.size(); l++)
 	{
 		auto ccount = meshopt_buildMeshletsBound(lods[l].index_count, max_vertices, max_triangles);
 		lod_clusters[l].resize(ccount);
@@ -180,7 +183,7 @@ ResourceID import_geometry(geometry_import_context& ctx)
 	u32 exp_icount = 0;
 	u32 exp_ccount = 0;
 	
-	for(u32 l = 0; l < num_lods; l++)
+	for(u32 l = 0; l < lods.size(); l++)
 	{
 		for(u32 m = 0; m < lod_cluster_counts[l]; m++)
 		{

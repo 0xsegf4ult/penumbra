@@ -42,6 +42,16 @@ struct geometry_import_context
 	bool is_skinned{false};
 };
 
+constexpr u32 geometry_max_lod_count = 8;
+
+struct geometry_full_lod
+{
+	s32 vertex_offset;
+	u32 vertex_count;
+	u32 index_offset;
+	u32 index_count;
+};
+
 enum import_texture_type
 {
 	IMPORT_TEXTURE_ALBEDO,
@@ -61,6 +71,15 @@ constexpr const char* texture_type_names[] =
 };
 
 ResourceID import_geometry(geometry_import_context& ctx);
+
+// remaps and optimizes lod0 in place; returns the packed vertex stream for lod-chain generation
+std::vector<geometry_full_vertex> geometry_prepare(geometry_import_context& ctx);
+
+// meshletizes every lod in `lods`, packs pos/uv/nor_tan/index/cluster streams and uploads
+// the result through the resource manager
+ResourceID geometry_meshletize_import(geometry_import_context& ctx, std::span<const geometry_full_lod> lods,
+                                      std::vector<geometry_full_vertex>& remap_vertices);
+
 ResourceID import_texture(std::string_view name, import_texture_type type, std::span<const u8> data, uvec3 dim);
 
 }
